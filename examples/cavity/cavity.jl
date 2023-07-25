@@ -84,8 +84,8 @@ function solve_cavity_resonator(
     # println(log_file)
 
     # Search through for the DOF count
-    start_ind = findfirst("number of global unknowns: ", log_file)[end]
-    end_ind = findfirst("\n", log_file[start_ind:end])[1]
+    start_ind = findfirst("ND: ", log_file)[end]
+    end_ind = findfirst(",", log_file[start_ind:end])[1]
     dof = parse(Int, filter(isdigit, log_file[start_ind:(start_ind + end_ind)]))
 
     # Extract the top two frequency modes
@@ -259,7 +259,7 @@ function generate_cavity_convergence_data(;
         push!(dof, eltype(dof)())
         push!(f_TM_010, eltype(f_TM_010)())
         push!(f_TE_111, eltype(f_TE_111)())
-        ref_lower = (p == 1 && mesh_type == 2) ? max(1, ref_min) : ref_min
+        ref_lower = ref_min
         ref_upper = (p > 3) ? min(3, ref_max) : ref_max
         for ref = ref_lower:ref_upper
             print("p = ", p, ", ref = ", ref, ": ")
