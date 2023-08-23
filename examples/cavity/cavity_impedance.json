@@ -11,7 +11,7 @@
     "L0": 1.0e-2,  // cm
     "Refinement":
     {
-      "UniformLevels": 1
+      "UniformLevels": 2
     }
   },
   "Domains":
