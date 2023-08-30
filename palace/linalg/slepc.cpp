@@ -281,7 +281,7 @@ void SlepcEigenvalueSolver::SetBMat(const Operator &B)
   opB = &B;
 }
 
-void SlepcEigenvalueSolver::SetShiftInvert(PetscScalar s, bool precond)
+void SlepcEigenvalueSolver::SetShiftInvert(std::complex<double> s, bool precond)
 {
   ST st = GetST();
   if (precond)
@@ -596,7 +596,7 @@ int SlepcEPSSolverBase::Solve()
   return (int)num_conv;
 }
 
-PetscScalar SlepcEPSSolverBase::GetEigenvalue(int i) const
+std::complex<double> SlepcEPSSolverBase::GetEigenvalue(int i) const
 {
   PetscScalar l;
   PalacePetscCall(EPSGetEigenvalue(eps, i, &l, nullptr));
@@ -1104,7 +1104,7 @@ int SlepcPEPSolverBase::Solve()
   return (int)num_conv;
 }
 
-PetscScalar SlepcPEPSolverBase::GetEigenvalue(int i) const
+std::complex<double> SlepcPEPSolverBase::GetEigenvalue(int i) const
 {
   PetscScalar l;
   PalacePetscCall(PEPGetEigenpair(pep, i, &l, nullptr, nullptr, nullptr));

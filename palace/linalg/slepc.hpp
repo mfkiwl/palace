@@ -12,6 +12,7 @@
 #error "SLEPc interface requires PETSc compiled with complex scalars!"
 #endif
 
+#include <complex>
 #include <memory>
 #include <string>
 #include <mpi.h>
@@ -147,7 +148,7 @@ public:
   PetscReal GetScalingDelta() const override { return delta; }
 
   // Set shift-and-invert spectral transformation.
-  void SetShiftInvert(PetscScalar s, bool precond = false) override;
+  void SetShiftInvert(std::complex<double> s, bool precond = false) override;
 
   // Set problem type.
   virtual void SetProblemType(ProblemType type) = 0;
@@ -215,7 +216,7 @@ public:
 
   int Solve() override;
 
-  PetscScalar GetEigenvalue(int i) const override;
+  std::complex<double> GetEigenvalue(int i) const override;
 
   void GetEigenvector(int i, ComplexVector &x) const override;
 
@@ -263,6 +264,7 @@ protected:
 public:
   SlepcEPSSolver(MPI_Comm comm, int print, const std::string &prefix = std::string());
 
+  using SlepcEigenvalueSolver::SetOperators;
   void SetOperators(const ComplexOperator &K, const ComplexOperator &M,
                     ScaleType type) override;
 
@@ -301,6 +303,7 @@ protected:
 public:
   SlepcPEPLinearSolver(MPI_Comm comm, int print, const std::string &prefix = std::string());
 
+  using SlepcEigenvalueSolver::SetOperators;
   void SetOperators(const ComplexOperator &K, const ComplexOperator &C,
                     const ComplexOperator &M, ScaleType type) override;
 
@@ -349,7 +352,7 @@ public:
 
   int Solve() override;
 
-  PetscScalar GetEigenvalue(int i) const override;
+  std::complex<double> GetEigenvalue(int i) const override;
 
   void GetEigenvector(int i, ComplexVector &x) const override;
 
@@ -398,6 +401,7 @@ protected:
 public:
   SlepcPEPSolver(MPI_Comm comm, int print, const std::string &prefix = std::string());
 
+  using SlepcEigenvalueSolver::SetOperators;
   void SetOperators(const ComplexOperator &K, const ComplexOperator &C,
                     const ComplexOperator &M, ScaleType type) override;
 
