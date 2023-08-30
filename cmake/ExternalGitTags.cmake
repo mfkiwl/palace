@@ -76,7 +76,7 @@ set(EXTERN_HYPRE_GIT_BRANCH
   "Git branch for external HYPRE build"
 )
 set(EXTERN_HYPRE_GIT_TAG
-  "b372b31a116a25d1432c689cef75881aac145a8e" CACHE STRING  # 08/16/2023
+  "0e43aec1d49b251eb38df4e00c8437aeb37daccc" CACHE STRING  # 08/27/2023
   "Git tag for external HYPRE build"
 )
 
@@ -104,8 +104,22 @@ set(EXTERN_LIBXSMM_GIT_BRANCH
   "Git branch for external LIBXSMM build"
 )
 set(EXTERN_LIBXSMM_GIT_TAG
-  "f4ba09230d84b78db0187320677d3c71d0d4854f" CACHE STRING  # 08/21/2023
+  "8e55d7303664672906af454e54e1f803d3eabdeb" CACHE STRING  # 08/24/2023
   "Git tag for external LIBXSMM build"
+)
+
+# MAGMA
+set(EXTERN_MAGMA_URL
+  "https://bitbucket.org/icl/magma.git" CACHE STRING
+  "URL for external MAGMA build"
+)
+set(EXTERN_MAGMA_GIT_BRANCH
+  "master" CACHE STRING
+  "Git branch for external MAGMA build"
+)
+set(EXTERN_MAGMA_GIT_TAG
+  "e37a7b228a35a6c6ddfeb7c49545d73f913305fa" CACHE STRING  # 08/25/2023
+  "Git tag for external MAGMA build"
 )
 
 # METIS
@@ -174,7 +188,7 @@ set(EXTERN_PETSC_GIT_BRANCH
   "Git branch for external PETSc build"
 )
 set(EXTERN_PETSC_GIT_TAG
-  "01a4aebd931b780f244a87406598026c571af919" CACHE STRING  # 08/27/2023
+  "d1b98e1ad7e81a8e640dcc5462f845558b11b2c2" CACHE STRING  # 08/28/2023
   "Git tag for external PETSc build"
 )
 
@@ -192,6 +206,20 @@ set(EXTERN_SCALAPACK_GIT_TAG
   "Git tag for external ScaLAPACK build"
 )
 
+# SLATE (for STRUMPACK)
+set(EXTERN_SLATE_URL
+  "https://github.com/icl-utk-edu/slate.git" CACHE STRING
+  "URL for external SLATE build"
+)
+set(EXTERN_SLATE_GIT_BRANCH
+  "master" CACHE STRING
+  "Git branch for external SLATE build"
+)
+set(EXTERN_SLATE_GIT_TAG
+  "57ea922b4a10876ba990a41648590ef36019acdd" CACHE STRING  # 08/25/2022
+  "Git tag for external SLATE build"
+)
+
 # SLEPc
 set(EXTERN_SLEPC_URL
   "https://gitlab.com/slepc/slepc.git" CACHE STRING
@@ -202,7 +230,7 @@ set(EXTERN_SLEPC_GIT_BRANCH
   "Git branch for external SLEPc build"
 )
 set(EXTERN_SLEPC_GIT_TAG
-  "2f6668495ab0d84da740777486385283a890d952" CACHE STRING  # 08/27/2023
+  "f4adb543022d4d5e8ce13e452a2e285e4f55c0da" CACHE STRING  # 08/28/2023
   "Git tag for external SLEPc build"
 )
 
@@ -244,7 +272,7 @@ set(EXTERN_ZFP_GIT_BRANCH
   "Git branch for external ZFP build"
 )
 set(EXTERN_ZFP_GIT_TAG
-  "bc5e24145ea6f168cf5dd672e0f11544013004da" CACHE STRING  # 08/24/2023
+  "d846d33fa3755a094141c7fe7947f2ffe35693c8" CACHE STRING  # 08/28/2023
   "Git tag for external ZFP build"
 )
 
@@ -256,7 +284,7 @@ set(EXTERN_JSON_URL
 
 # fmt
 set(EXTERN_FMT_URL
-  "https://github.com/fmtlib/fmt/releases/download/10.0.0/fmt-10.0.0.zip" CACHE STRING
+  "https://github.com/fmtlib/fmt/releases/download/10.1.1/fmt-10.1.1.zip" CACHE STRING
   "URL for external fmt build"
 )
 

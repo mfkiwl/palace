@@ -5,8 +5,8 @@
 # CMake configuration for the main Palace application
 #
 
-# CMake 3.18.1 was released in Jul. 2020
-cmake_minimum_required(VERSION 3.18.1)
+# CMake 3.21 was released in Jul. 2021 (required for HIP support)
+cmake_minimum_required(VERSION 3.21)
 
 # Prohibit in-source builds
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
@@ -22,7 +22,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 project(palace LANGUAGES CXX VERSION 0.11.2)
 
 # Define build settings and defaults
-set(PALACE_WITH_OPENMP OFF CACHE BOOL "Use OpenMP")
+set(PALACE_WITH_OPENMP OFF CACHE BOOL "Use OpenMP for shared-memory parallelism")
 
 set(PALACE_WITH_SLEPC ON CACHE BOOL "Build with SLEPc eigenvalue solver")
 set(PALACE_WITH_ARPACK OFF CACHE BOOL "Build with ARPACK eigenvalue solver")

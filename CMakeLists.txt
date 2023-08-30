@@ -5,8 +5,8 @@
 # CMake superbuild for Palace and its dependencies
 #
 
-# CMake 3.18.1 was released in Jul. 2020
-cmake_minimum_required(VERSION 3.18.1)
+# CMake 3.21 was released in Jul. 2021 (required for HIP support)
+cmake_minimum_required(VERSION 3.21)
 
 # Prohibit in-source builds
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
@@ -18,8 +18,11 @@ project(palace-superbuild LANGUAGES CXX C VERSION 0.11.2)
 
 # Define build settings and defaults
 set(PALACE_WITH_64BIT_INT OFF CACHE BOOL "Use 64 bit integers")
-set(PALACE_WITH_64BIT_BLAS_INT OFF CACHE BOOL "Use ILP64 BLAS/LAPACK interface instead of LP64 (not recommended)")
-set(PALACE_WITH_OPENMP OFF CACHE BOOL "Use OpenMP")
+set(PALACE_WITH_64BIT_BLAS_INT OFF CACHE BOOL "Use ILP64 BLAS/LAPACK interface instead of LP64 (experimental, not recommended)")
+set(PALACE_WITH_OPENMP OFF CACHE BOOL "Use OpenMP for shared-memory parallelism")
+set(PALACE_WITH_CUDA OFF CACHE BOOL "Use CUDA for NVIDIA GPU support")
+set(PALACE_WITH_HIP OFF CACHE BOOL "Use HIP for AMD or NVIDIA GPU support")
+
 set(PALACE_WITH_LIBCEED ON CACHE BOOL "Build with libCEED library for high-order partial assembly support")
 set(PALACE_WITH_GSLIB ON CACHE BOOL "Build with GSLIB library for high-order field interpolation")
 
@@ -30,6 +33,7 @@ set(PALACE_WITH_MUMPS OFF CACHE BOOL "Build with MUMPS sparse direct solver")
 set(PALACE_WITH_SLEPC ON CACHE BOOL "Build with SLEPc eigenvalue solver")
 set(PALACE_WITH_ARPACK OFF CACHE BOOL "Build with ARPACK eigenvalue solver")
 set(PALACE_WITH_LIBXSMM ON CACHE BOOL "Build with LIBXSMM backend when libCEED is enabled")
+set(PALACE_WITH_MAGMA ON CACHE BOOL "Build with MAGMA backend when libCEED is enabled")
 
 set(ANALYZE_SOURCES_CLANG_TIDY OFF CACHE BOOL "Run static analysis checks using clang-tidy")
 set(ANALYZE_SOURCES_CPPCHECK OFF CACHE BOOL "Run static analysis checks using cppcheck")
@@ -39,16 +43,42 @@ if(PALACE_WITH_STRUMPACK OR PALACE_WITH_MUMPS OR PALACE_WITH_ARPACK)
   enable_language(Fortran)
 endif()
 
-# Set a default installation location if none was provided
-if(NOT CMAKE_INSTALL_PREFIX OR CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  message(STATUS "Setting CMAKE_INSTALL_PREFIX to '${CMAKE_BINARY_DIR}' as none was specified")
-  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE STRING "Install directory used by install()" FORCE)
+# Enable CUDA/HIP if required
+if(PALACE_WITH_CUDA AND PALACE_WITH_HIP)
+  message(FATAL_ERROR "PALACE_WITH_CUDA is not compatible with PALACE_WITH_HIP")
+endif()
+if(PALACE_WITH_CUDA)
+  enable_language(CUDA)
+  get_filename_component(NVCC_DIR ${CMAKE_CUDA_COMPILER} DIRECTORY)
+  get_filename_component(BIN_NVCC_DIR ${NVCC_DIR} DIRECTORY)
+  set(CUDA_DIR "${BIN_NVCC_DIR}" CACHE STRING "CUDA installation directory, typically /usr/local/cuda or /opt/cuda")
+  message(STATUS "Found CUDA: ${CUDA_DIR}")
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    message(STATUS "Setting CMAKE_CUDA_ARCHITECTURES to '70' as none were specified")
+    set(CMAKE_CUDA_ARCHITECTURES "70" CACHE STRING "Specifies the list of NVIDIA GPU architectures to generate device code for")
+  endif()
+elseif(PALACE_WITH_HIP)
+  enable_language(HIP)
+  get_filename_component(HIPCC_DIR ${CMAKE_HIP_COMPILER} DIRECTORY)
+  get_filename_component(BIN_HIPCC_DIR ${HIPCC_DIR} DIRECTORY)
+  set(ROCM_DIR "${BIN_HIPCC_DIR}" CACHE STRING "CUDA installation directory, typically /opt/rocm")
+  message(STATUS "Found HIP: ${ROCM_DIR}")
+  if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+    message(STATUS "Setting CMAKE_HIP_ARCHITECTURES to 'gfx900' as none were specified")
+    set(CMAKE_HIP_ARCHITECTURES "gfx900" CACHE STRING "Specifies the list of AMD GPU architectures to generate device code for")
+  endif()
 endif()
 
 # Set a default build type if none was provided
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting CMAKE_BUILD_TYPE to 'Release' as none was specified")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Specifies the build type ('Debug' or 'Release', for example)" FORCE)
+endif()
+
+# Set a default installation location if none was provided
+if(NOT CMAKE_INSTALL_PREFIX OR CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  message(STATUS "Setting CMAKE_INSTALL_PREFIX to '${CMAKE_BINARY_DIR}' as none was specified")
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE STRING "Install directory used by install()" FORCE)
 endif()
 
 # Set a default for dependency library builds if none was provided
@@ -65,6 +95,12 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 if(CMAKE_C_COMPILER_ID STREQUAL "Intel" OR CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
   message(WARNING "The Intel classic compilers (icc/icpc) are no longer supported and \
 have been replaced by the newer Clang-based icx/icpx from Intel oneAPI")
+endif()
+
+# MAGMA is only for GPU builds
+if(PALACE_WITH_MAGMA AND NOT (PALACE_WITH_CUDA OR PALACE_WITH_HIP))
+  message(STATUS "Disabling MAGMA due to lack of CUDA or HIP support")
+  set(PALACE_WITH_MAGMA OFF CACHE BOOL "Build with MAGMA backend when libCEED is enabled" FORCE)
 endif()
 
 # MPI is required for most dependency builds

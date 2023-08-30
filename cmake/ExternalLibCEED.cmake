@@ -6,10 +6,14 @@
 #
 
 # Force build order
-if(PALACE_BUILD_EXTERNAL_DEPS AND PALACE_WITH_LIBXSMM)
-  set(LIBCEED_DEPENDENCIES libxsmm)
-else()
-  set(LIBCEED_DEPENDENCIES)
+set(LIBCEED_DEPENDENCIES)
+if(PALACE_BUILD_EXTERNAL_DEPS)
+  if(PALACE_WITH_LIBXSMM)
+    list(APPEND LIBCEED_DEPENDENCIES libxsmm)
+  endif()
+  if(PALACE_WITH_MAGMA)
+    list(APPEND LIBCEED_DEPENDENCIES magma)
+  endif()
 endif()
 
 # Note on recommended flags for libCEED (from Makefile, Spack):
@@ -24,6 +28,14 @@ endif()
 check_c_compiler_flag(${OMP_SIMD_FLAG} SUPPORTS_OMP_SIMD)
 if(SUPPORTS_OMP_SIMD)
   set(LIBCEED_C_FLAGS "${LIBCEED_C_FLAGS} ${OMP_SIMD_FLAG}")
+endif()
+
+# Silence some CUDA/HIP include file warnings
+if(PALACE_WITH_CUDA)
+  set(LIBCEED_C_FLAGS "${LIBCEED_C_FLAGS} -isystem ${CUDA_DIR}/include")
+endif()
+if(PALACE_WITH_HIP)
+  set(LIBCEED_C_FLAGS "${LIBCEED_C_FLAGS} -isystem ${ROCM_DIR}/include")
 endif()
 
 # Build libCEED (always as a shared library)
@@ -42,10 +54,7 @@ if(PALACE_WITH_OPENMP)
   )
 endif()
 
-# Configure libCEED backends (disable CUDA for now, AVX handled automatically)
-list(APPEND LIBCEED_OPTIONS
-  "CUDA_DIR=/disable-cuda"
-)
+# Configure libCEED backends
 if(PALACE_WITH_LIBXSMM)
   if(PALACE_BUILD_EXTERNAL_DEPS)
     list(APPEND LIBCEED_OPTIONS
@@ -66,6 +75,39 @@ if(PALACE_WITH_LIBXSMM)
   #     "BLAS_LIB=${LIBCEED_BLAS_LAPACK_LIBRARIES}"
   #   )
   # endif()
+endif()
+if(PALACE_WITH_CUDA)
+  list(APPEND LIBCEED_OPTIONS
+    "CUDA_DIR=${CUDA_DIR}"
+  )
+  if(NOT "${CMAKE_CUDA_ARCHITECTURES}" STREQUAL "")
+    list(GET CMAKE_CUDA_ARCHITECTURES 0 LIBCEED_CUDA_ARCH)
+    list(APPEND LIBCEED_OPTIONS
+      "CUDA_ARCH=sm_${LIBCEED_CUDA_ARCH}"
+    )
+  endif()
+endif()
+if(PALACE_WITH_HIP)
+  list(APPEND LIBCEED_OPTIONS
+    "ROCM_DIR=${ROCM_DIR}"
+  )
+  if(NOT "${CMAKE_HIP_ARCHITECTURES}" STREQUAL "")
+    list(GET CMAKE_HIP_ARCHITECTURES 0 LIBCEED_HIP_ARCH)
+    list(APPEND LIBCEED_OPTIONS
+      "HIP_ARCH=${LIBCEED_HIP_ARCH}"
+    )
+  endif()
+endif()
+if(PALACE_WITH_MAGMA)
+  if(PALACE_BUILD_EXTERNAL_DEPS)
+    list(APPEND LIBCEED_OPTIONS
+      "MAGMA_DIR=${CMAKE_INSTALL_PREFIX}"
+    )
+  else()
+    list(APPEND LIBCEED_OPTIONS
+      "MAGMA_DIR=${MAGMA_DIR}"
+    )
+  endif()
 endif()
 
 string(REPLACE ";" "; " LIBCEED_OPTIONS_PRINT "${LIBCEED_OPTIONS}")
@@ -93,6 +135,7 @@ ExternalProject_Add(libCEED
   TEST_COMMAND      ""
 )
 
+set(_LIBCEED_EXTRA_LIBRARIES)
 if(PALACE_WITH_LIBXSMM)
   if(PALACE_BUILD_EXTERNAL_DEPS)
     include(GNUInstallDirs)
@@ -100,5 +143,23 @@ if(PALACE_WITH_LIBXSMM)
   else()
     set(_LIBXSMM_LIBRARIES "-lxsmm")
   endif()
-  set(LIBCEED_EXTRA_LIBRARIES ${_LIBXSMM_LIBRARIES} CACHE STRING "List of extra library files for libCEED")
+  list(APPEND _LIBCEED_EXTRA_LIBRARIES ${_LIBXSMM_LIBRARIES})
+endif()
+if(PALACE_WITH_MAGMA)
+  if(PALACE_BUILD_EXTERNAL_DEPS)
+    include(GNUInstallDirs)
+    if(BUILD_SHARED_LIBS)
+      set(_MAGMA_LIB_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
+    else()
+      set(_MAGMA_LIB_SUFFIX ${CMAKE_STATIC_LIBRARY_SUFFIX})
+    endif()
+    set(_MAGMA_LIBRARIES ${CMAKE_INSTALL_PREFIX}/lib/libmagma${_MAGMA_LIB_SUFFIX})
+  else()
+    set(_MAGMA_LIBRARIES "-lmagma")
+  endif()
+  list(APPEND _LIBCEED_EXTRA_LIBRARIES ${_MAGMA_LIBRARIES})
+endif()
+if(NOT "${_LIBCEED_EXTRA_LIBRARIES}" STREQUAL "")
+  string(REPLACE ";" "$<SEMICOLON>" _LIBCEED_EXTRA_LIBRARIES "${_LIBCEED_EXTRA_LIBRARIES}")
+  set(LIBCEED_EXTRA_LIBRARIES ${_LIBCEED_EXTRA_LIBRARIES} CACHE STRING "List of extra library files for libCEED")
 endif()
