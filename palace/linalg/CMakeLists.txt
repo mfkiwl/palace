@@ -27,3 +27,26 @@ target_sources(${TARGET_NAME}
   ${CMAKE_CURRENT_SOURCE_DIR}/superlu.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vector.cpp
 )
+
+if(PALACE_WITH_CUDA)
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/chebyshev.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jacobi.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vector.cpp
+    TARGET_DIRECTORY ${TARGET_NAME}
+    PROPERTIES LANGUAGE CUDA
+  )
+endif()
+if(PALACE_WITH_HIP)
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/chebyshev.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jacobi.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vector.cpp
+    TARGET_DIRECTORY ${TARGET_NAME}
+    PROPERTIES LANGUAGE HIP
+  )
+endif()

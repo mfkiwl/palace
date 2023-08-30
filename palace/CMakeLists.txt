@@ -23,6 +23,8 @@ project(palace LANGUAGES CXX VERSION 0.11.2)
 
 # Define build settings and defaults
 set(PALACE_WITH_OPENMP OFF CACHE BOOL "Use OpenMP for shared-memory parallelism")
+set(PALACE_WITH_CUDA OFF CACHE BOOL "Use CUDA for NVIDIA GPU support")
+set(PALACE_WITH_HIP OFF CACHE BOOL "Use HIP for AMD or NVIDIA GPU support")
 
 set(PALACE_WITH_SLEPC ON CACHE BOOL "Build with SLEPc eigenvalue solver")
 set(PALACE_WITH_ARPACK OFF CACHE BOOL "Build with ARPACK eigenvalue solver")
@@ -39,6 +41,29 @@ set(ARPACK_DIR "" CACHE STRING "Path to ARPACK build or installation directory (
 # Enable Fortran if required
 if(PALACE_WITH_ARPACK)
   enable_language(Fortran)
+endif()
+
+# Enable CUDA/HIP if required
+if(PALACE_WITH_CUDA AND PALACE_WITH_HIP)
+  message(FATAL_ERROR "PALACE_WITH_CUDA is not compatible with PALACE_WITH_HIP")
+endif()
+if(PALACE_WITH_CUDA)
+  enable_language(CUDA)
+   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda")
+elseif(PALACE_WITH_HIP)
+  enable_language(HIP)
+endif()
+
+# Set a default build type if none was provided
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting CMAKE_BUILD_TYPE to 'Release' as none was specified")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Specifies the build type ('Debug' or 'Release', for example)" FORCE)
+endif()
+
+# Set a default installation location if none was provided
+if(NOT CMAKE_INSTALL_PREFIX OR CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  message(STATUS "Setting CMAKE_INSTALL_PREFIX to '${CMAKE_BINARY_DIR}' as none was specified")
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE STRING "Install directory used by install()" FORCE)
 endif()
 
 # Set a default build type if none was provided
@@ -70,10 +95,11 @@ message(STATUS "Found fmt: ${fmt_VERSION} in ${fmt_DIR}")
 find_package(Eigen3 REQUIRED CONFIG)
 message(STATUS "Found Eigen: ${Eigen3_VERSION} in ${Eigen3_DIR}")
 
-# Find MFEM
+# Find MFEM (recent MFEM targets link to target Threads::Threads, for some reason)
 if(NOT "${MFEM_DIR}" STREQUAL "")
   set(MFEM_ROOT ${MFEM_DIR})
 endif()
+find_package(Threads REQUIRED)
 find_package(MFEM REQUIRED CONFIG)
 message(STATUS "Found MFEM: ${MFEM_VERSION} in ${MFEM_DIR}")
 if(NOT MFEM_USE_MPI)
