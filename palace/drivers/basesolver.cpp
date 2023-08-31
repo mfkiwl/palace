@@ -177,9 +177,11 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
                                     Timer &timer) const
 {
   // Helper to save off postprocess data.
-  auto save_postprocess = [&, this](int iter)
+  auto comm = mesh.back()->GetComm();
+  auto save_postprocess = [&, this, comm](int iter)
   {
-    if (Mpi::Root(Mpi::World()))
+    Mpi::Barrier(comm);
+    if (Mpi::Root(comm))
     {
       namespace fs = std::filesystem;
       // Create a subfolder denoting the results of this adaptation.
