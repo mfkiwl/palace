@@ -1132,6 +1132,7 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
     std::ofstream dumpmesh("dump.msh");
     dumpmesh.precision(MSH_FLT_PRECISION);
     mesh->PrintAsSerial(msg);
+    Mpi::Barrier(comm);
     mesh->PrintAsSerial(dumpmesh);
     Mpi::Barrier(comm);
     mesh.reset(); // Release the no longer needed memory.
@@ -1173,8 +1174,6 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
     partitioning = GetMeshPartitioning(*smesh, Mpi::Size(comm));
   }
   mesh = DistributeMesh(comm, smesh, partitioning);
-  mesh->FinalizeTopology(generate_bdr);
-  mesh->Finalize(refine, fix_orientation);
 }
 
 }  // namespace mesh
