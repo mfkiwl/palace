@@ -51,7 +51,7 @@ std::map<int, std::array<int, 2>> CheckMesh(mfem::Mesh &orig_mesh,
 // Given a serial mesh on the root processor, and element partitioning, create a parallel
 // mesh over the given communicator.
 std::unique_ptr<mfem::ParMesh>
-DistributeMesh(MPI_Comm comm, std::unique_ptr<mfem::Mesh> &mesh,
+DistributeMesh(MPI_Comm comm, const std::unique_ptr<mfem::Mesh> &mesh,
                const std::unique_ptr<int[]> &partitioning = nullptr,
                const std::string &output_dir = "");
 
@@ -92,8 +92,7 @@ std::unique_ptr<mfem::ParMesh> ReadMesh(MPI_Comm comm, const IoData &iodata, boo
   std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
   const auto use_amr = iodata.model.refinement.adaptation.max_its > 0;
-  const bool use_mesh_partitioner = false;
-      // !use_amr || !iodata.model.refinement.adaptation.nonconformal;
+  const bool use_mesh_partitioner = !use_amr || !iodata.model.refinement.adaptation.nonconformal;
   if (Mpi::Root(comm) || !use_mesh_partitioner)
   {
     // If using the mesh partitioner, only the root node needs to load the mesh.
@@ -112,6 +111,7 @@ std::unique_ptr<mfem::ParMesh> ReadMesh(MPI_Comm comm, const IoData &iodata, boo
   {
     const auto element_types = CheckElements(*smesh);
 
+    // Check the the AMR specification and the mesh elements are compatible.
     MFEM_VERIFY(!use_amr || !element_types.has_tensors ||
                     iodata.model.refinement.adaptation.nonconformal,
                 "If there are tensor elements, AMR must be nonconformal");
@@ -131,14 +131,17 @@ std::unique_ptr<mfem::ParMesh> ReadMesh(MPI_Comm comm, const IoData &iodata, boo
   }
 
   std::unique_ptr<mfem::ParMesh> pmesh;
-  if (iodata.model.refinement.adaptation.nonconformal && use_amr)
+  if (use_mesh_partitioner)
   {
-    smesh->EnsureNCMesh(true);
-    pmesh = std::make_unique<mfem::ParMesh>(comm, *smesh, partitioning.get());
+    pmesh = DistributeMesh(comm, smesh, partitioning, iodata.problem.output);
   }
   else
   {
-    pmesh = DistributeMesh(comm, smesh, partitioning, iodata.problem.output);
+    if (iodata.model.refinement.adaptation.nonconformal && use_amr)
+    {
+      smesh->EnsureNCMesh(true);
+    }
+    pmesh = std::make_unique<mfem::ParMesh>(comm, *smesh, partitioning.get());
   }
 
   if constexpr (false)
@@ -1115,27 +1118,26 @@ void GetSurfaceNormal(mfem::ParMesh &mesh, const mfem::Array<int> &marker,
 
 void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
 {
-  Mpi::Warning("Rebalancing a conformal mesh is currently highly experimental.\n");
-
+  // Write the parallel mesh to a stream as a serial mesh, then read back in and partition
+  // using METIS.
   auto comm = mesh->GetComm();
-
-  std::unique_ptr<mfem::Mesh> smesh = std::make_unique<mfem::Mesh>(mesh->GetSerialMesh(0));
+  std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
-
-  if (!Mpi::Root(comm))
+  std::stringstream msg;
+  mesh->PrintAsSerial(msg);
+  Mpi::Barrier(comm);
+  mesh.reset(); // Release the no longer needed memory.
+  constexpr bool generate_bdr = false, generate_edges = true, refine = true, fix_orientation = true;
+  if (Mpi::Root(comm))
   {
-    // The generated mesh on non-root processors is junk.
-    smesh.reset();
-  }
-  else
-  {
+    smesh = std::make_unique<mfem::Mesh>(msg, generate_edges, refine, fix_orientation);
+    smesh->FinalizeTopology(generate_bdr);
+    smesh->Finalize(refine, fix_orientation);
     partitioning = GetMeshPartitioning(*smesh, Mpi::Size(comm));
   }
-
   mesh = DistributeMesh(comm, smesh, partitioning);
-  mesh->FinalizeTopology();
-  mesh->Finalize(true);
-  mesh->ExchangeFaceNbrData();
+  mesh->FinalizeTopology(generate_bdr);
+  mesh->Finalize(refine, fix_orientation);
 }
 
 }  // namespace mesh
@@ -1657,7 +1659,7 @@ std::map<int, std::array<int, 2>> CheckMesh(mfem::Mesh &orig_mesh,
 }
 
 std::unique_ptr<mfem::ParMesh> DistributeMesh(MPI_Comm comm,
-                                              std::unique_ptr<mfem::Mesh> &smesh,
+                                              const std::unique_ptr<mfem::Mesh> &smesh,
                                               const std::unique_ptr<int[]> &partitioning,
                                               const std::string &output_dir)
 {

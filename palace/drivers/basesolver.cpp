@@ -124,6 +124,7 @@ mfem::Array<int> MarkedElements(double threshold, const mfem::Vector &e, bool gt
 void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalance)
 {
   auto comm = Mpi::World();
+  mesh->ExchangeFaceNbrData();
   if (Mpi::Size(comm) > 1)
   {
     int min_elem, max_elem;
@@ -153,8 +154,10 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
     }
   }
 
-  mesh->FinalizeTopology();
-  mesh->Finalize(true);
+  // All mesh corrections should have been performed during the initial mesh load, so we do
+  // not allow any additional modifications.
+  mesh->FinalizeTopology(false);
+  mesh->Finalize(true, true);
 
   // If the mesh is higher order, synchronize through the nodal grid function.
   // This will in turn call the mesh exchange of face neighbor data.
@@ -221,8 +224,6 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
     mesh.erase(mesh.begin(), mesh.end() - 1);
   }
 
-  mesh.back()->ExchangeFaceNbrData();
-
   int iter = 0;
   auto indicators = Solve(mesh, timer);
 
@@ -270,7 +271,7 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
           MarkedElements(threshold, indicators.local_error_indicators);
 
       const auto initial_elem_count = mesh.back()->GetGlobalNE();
-      mesh.back()->GeneralRefinement(marked_elements, 1, param.max_nc_levels);
+      mesh.back()->GeneralRefinement(marked_elements, -1, param.max_nc_levels);
       const auto final_elem_count = mesh.back()->GetGlobalNE();
       Mpi::Print("Mesh refinement added {} elements. Initial: {}, Final: {}\n",
                  final_elem_count - initial_elem_count, initial_elem_count,
@@ -281,7 +282,6 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
       // Perform a Dorfler style marking looking for the largest number of
       // derefinement opportunities to represent a fraction of the derefinable error.
       const auto &derefinement_table = mesh.back()->pncmesh->GetDerefinementTable();
-
       mfem::Vector coarse_error(derefinement_table.Size());
       for (int i = 0; i < derefinement_table.Size(); i++)
       {
@@ -299,10 +299,8 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
       // identify the smallest set of elements that make up (1 - θ) of the total
       // error, where θ is the coarsening fraction. The complement of this set
       // is then the largest number of elements that make up θ of the total error.
-
       const double threshold =
           utils::ComputeDorflerThreshold(1 - param.coarsening_fraction, coarse_error);
-
       const auto initial_elem_count = mesh.back()->GetGlobalNE();
       mesh.back()->DerefineByError(indicators.local_error_indicators, threshold,
                                    param.max_nc_levels);
@@ -313,22 +311,17 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
     }
 
     RebalanceMesh(mesh.back(), iodata.model.refinement.adaptation.maximum_imbalance);
-
-    // Solve + estimate.
     indicators = Solve(mesh, timer);
-
     iter++;
 
-    // Optionally save solution off
+    // Optionally save solution off.
     if (param.save_step > 0 && iter % param.save_step == 0)
     {
       save_postprocess(iter);
     }
   }
-
-  Mpi::Print("\nError Indicator: {:.3e}, DOF: {}\n", indicators.global_error_indicator,
+  Mpi::Print("\nFinal Error Indicator: {:.3e}, DOF: {}\n", indicators.global_error_indicator,
              indicators.ndof);
-
   return indicators;
 }
 void BaseSolver::SaveMetadata(const mfem::ParFiniteElementSpaceHierarchy &fespaces) const
