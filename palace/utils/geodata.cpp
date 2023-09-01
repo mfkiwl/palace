@@ -1121,16 +1121,53 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
   // Write the parallel mesh to a stream as a serial mesh, then read back in and partition
   // using METIS.
   auto comm = mesh->GetComm();
+  constexpr bool generate_bdr = false, generate_edges = true, refine = true, fix_orientation = true;
   std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
-  std::stringstream msg;
-  mesh->PrintAsSerial(msg);
-  Mpi::Barrier(comm);
-  mesh.reset(); // Release the no longer needed memory.
-  constexpr bool generate_bdr = false, generate_edges = true, refine = true, fix_orientation = true;
+  if constexpr (true)
+  {
+    // Write the serial mesh to a stream and read that through the Mesh constructor.
+    std::stringstream msg;
+    msg.precision(MSH_FLT_PRECISION);
+    std::ofstream dumpmesh("dump.msh");
+    dumpmesh.precision(MSH_FLT_PRECISION);
+    mesh->PrintAsSerial(msg);
+    mesh->PrintAsSerial(dumpmesh);
+    Mpi::Barrier(comm);
+    mesh.reset(); // Release the no longer needed memory.
+    if (Mpi::Root(comm))
+    {
+      smesh = std::make_unique<mfem::Mesh>(msg, generate_edges, refine, fix_orientation);
+    }
+  }
+  else
+  {
+    // Directly ingest the generated Mesh.
+    smesh = std::make_unique<mfem::Mesh>(mesh->GetSerialMesh(0));
+
+    // std::stringstream msg;
+    // msg.precision(MSH_FLT_PRECISION);
+    // mesh->PrintAsSerial(msg);
+    // if (Mpi::Root(comm))
+    // {
+    //   Mpi::Print("Direct processed mesh\n");
+    //   smesh->PrintCharacteristics();
+    //   auto smesh2 = std::make_unique<mfem::Mesh>(msg, generate_edges, refine, fix_orientation);
+    //   Mpi::Print("Stream processed mesh\n");
+    //   smesh2->PrintCharacteristics();
+    // }
+
+    Mpi::Barrier(comm);
+    mesh.reset(); // Release the no longer needed memory.
+
+    if (Mpi::Rank(comm) != 0)
+    {
+      smesh.reset();
+    }
+  }
+
   if (Mpi::Root(comm))
   {
-    smesh = std::make_unique<mfem::Mesh>(msg, generate_edges, refine, fix_orientation);
     smesh->FinalizeTopology(generate_bdr);
     smesh->Finalize(refine, fix_orientation);
     partitioning = GetMeshPartitioning(*smesh, Mpi::Size(comm));
