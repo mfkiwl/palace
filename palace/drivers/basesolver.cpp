@@ -141,7 +141,7 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
     {
       if (mesh->Nonconforming())
       {
-        Mpi::Print("Ratio {:.3e} exceeds maximum allowed value {} -> Rebalancing.", ratio,
+        Mpi::Print("Ratio {:.3e} exceeds maximum allowed value {}: Performing rebalancing.\n", ratio,
                    maximum_imbalance);
         mesh->Rebalance();
       }
@@ -261,7 +261,7 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
   while ((iter < param.min_its || indicators.global_error_indicator > param.tolerance) &&
          !exhausted_resources())
   {
-    Mpi::Print("Adaptation iteration {}: Error Indicator: {:.3e}, DOF: {}\n", iter,
+    Mpi::Print("Adaptation iteration {}: Initial Error Indicator: {:.3e}, DOF: {}\n", ++iter,
                indicators.global_error_indicator, indicators.ndof);
     if (indicators.ndof < param.dof_limit)
     {
@@ -312,7 +312,6 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
 
     RebalanceMesh(mesh.back(), iodata.model.refinement.adaptation.maximum_imbalance);
     indicators = Solve(mesh, timer);
-    iter++;
 
     // Optionally save solution off.
     if (param.save_step > 0 && iter % param.save_step == 0)
