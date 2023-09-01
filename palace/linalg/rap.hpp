@@ -182,6 +182,9 @@ public:
   // nullptr.
   const mfem::Array<int> *GetEssentialTrueDofs() const { return dbc_tdof_list; }
 
+  // Assemble the diagonal for the parallel operator.
+  void AssembleDiagonal(ComplexVector &diag) const;
+
   bool IsReal() const override { return A->IsReal(); }
   bool IsImag() const override { return A->IsImag(); }
   bool HasReal() const override { return RAPr != nullptr; }

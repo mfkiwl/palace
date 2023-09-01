@@ -12,67 +12,45 @@ namespace palace
 namespace
 {
 
-void GetInverseDiagonal(const ParOperator &A, Vector &dinv)
-{
-  dinv.SetSize(A.Height());
-  A.AssembleDiagonal(dinv);
-  dinv.Reciprocal();
-}
-
-void GetInverseDiagonal(const ComplexParOperator &A, ComplexVector &dinv)
-{
-  MFEM_VERIFY(A.HasReal() || A.HasImag(),
-              "Invalid zero ComplexOperator for JacobiSmoother!");
-  dinv.SetSize(A.Height());
-  dinv = 0.0;
-  if (A.HasReal())
-  {
-    A.Real()->AssembleDiagonal(dinv.Real());
-  }
-  if (A.HasImag())
-  {
-    A.Imag()->AssembleDiagonal(dinv.Imag());
-  }
-  dinv.Reciprocal();
-}
-
 template <bool Transpose = false>
 inline void Apply(const Vector &dinv, const Vector &x, Vector &y)
 {
+  const bool use_dev = dinv.UseDevice() || x.UseDevice() || y.UseDevice();
   const int N = dinv.Size();
-  const auto *DI = dinv.Read();
-  const auto *X = x.Read();
-  auto *Y = y.Write();
-  mfem::forall(N, [=] MFEM_HOST_DEVICE(int i) { Y[i] = DI[i] * X[i]; });
+  const auto *DI = dinv.Read(use_dev);
+  const auto *X = x.Read(use_dev);
+  auto *Y = y.Write(use_dev);
+  mfem::forall_switch(use_dev, N, [=] MFEM_HOST_DEVICE(int i) { Y[i] = DI[i] * X[i]; });
 }
 
 template <bool Transpose = false>
 inline void Apply(const ComplexVector &dinv, const ComplexVector &x, ComplexVector &y)
 {
+  const bool use_dev = dinv.UseDevice() || x.UseDevice() || y.UseDevice();
   const int N = dinv.Size();
-  const auto *DIR = dinv.Real().Read();
-  const auto *DII = dinv.Imag().Read();
-  const auto *XR = x.Real().Read();
-  const auto *XI = x.Imag().Read();
-  auto *YR = y.Real().Write();
-  auto *YI = y.Imag().Write();
+  const auto *DIR = dinv.Real().Read(use_dev);
+  const auto *DII = dinv.Imag().Read(use_dev);
+  const auto *XR = x.Real().Read(use_dev);
+  const auto *XI = x.Imag().Read(use_dev);
+  auto *YR = y.Real().Write(use_dev);
+  auto *YI = y.Imag().Write(use_dev);
   if constexpr (!Transpose)
   {
-    mfem::forall(N,
-                 [=] MFEM_HOST_DEVICE(int i)
-                 {
-                   YR[i] = DIR[i] * XR[i] - DII[i] * XI[i];
-                   YI[i] = DII[i] * XR[i] + DIR[i] * XI[i];
-                 });
+    mfem::forall_switch(use_dev, N,
+                        [=] MFEM_HOST_DEVICE(int i)
+                        {
+                          YR[i] = DIR[i] * XR[i] - DII[i] * XI[i];
+                          YI[i] = DII[i] * XR[i] + DIR[i] * XI[i];
+                        });
   }
   else
   {
-    mfem::forall(N,
-                 [=] MFEM_HOST_DEVICE(int i)
-                 {
-                   YR[i] = DIR[i] * XR[i] + DII[i] * XI[i];
-                   YI[i] = -DII[i] * XR[i] + DIR[i] * XI[i];
-                 });
+    mfem::forall_switch(use_dev, N,
+                        [=] MFEM_HOST_DEVICE(int i)
+                        {
+                          YR[i] = DIR[i] * XR[i] + DII[i] * XI[i];
+                          YI[i] = -DII[i] * XR[i] + DIR[i] * XI[i];
+                        });
   }
 }
 
@@ -85,13 +63,16 @@ void JacobiSmoother<OperType>::SetOperator(const OperType &op)
       typename std::conditional<std::is_same<OperType, ComplexOperator>::value,
                                 ComplexParOperator, ParOperator>::type;
 
-  this->height = op.Height();
-  this->width = op.Width();
-
   const auto *PtAP = dynamic_cast<const ParOperType *>(&op);
   MFEM_VERIFY(PtAP,
               "JacobiSmoother requires a ParOperator or ComplexParOperator operator!");
-  GetInverseDiagonal(*PtAP, dinv);
+  dinv.SetSize(op.Height());
+  dinv.UseDevice(true);
+  PtAP->AssembleDiagonal(dinv);
+  dinv.Reciprocal();
+
+  this->height = op.Height();
+  this->width = op.Width();
 }
 
 template <typename OperType>

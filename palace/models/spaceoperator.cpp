@@ -895,6 +895,7 @@ bool SpaceOperator::GetExcitationVector(Vector &RHS)
 {
   // Time domain excitation vector.
   RHS.SetSize(GetNDSpace().GetTrueVSize());
+  RHS.UseDevice(true);
   RHS = 0.0;
   bool nnz = AddExcitationVector1Internal(RHS);
   linalg::SetSubVector(RHS, nd_dbc_tdof_lists.back(), 0.0);
@@ -905,6 +906,7 @@ bool SpaceOperator::GetExcitationVector(double omega, ComplexVector &RHS)
 {
   // Frequency domain excitation vector: RHS = iω RHS1 + RHS2(ω).
   RHS.SetSize(GetNDSpace().GetTrueVSize());
+  RHS.UseDevice(true);
   RHS = 0.0;
   bool nnz1 = AddExcitationVector1Internal(RHS.Real());
   RHS *= 1i * omega;
@@ -918,6 +920,7 @@ bool SpaceOperator::GetExcitationVector1(ComplexVector &RHS1)
   // Assemble the frequency domain excitation term with linear frequency dependence
   // (coefficient iω, see GetExcitationVector above, is accounted for later).
   RHS1.SetSize(GetNDSpace().GetTrueVSize());
+  RHS1.UseDevice(true);
   RHS1 = 0.0;
   bool nnz1 = AddExcitationVector1Internal(RHS1.Real());
   linalg::SetSubVector(RHS1.Real(), nd_dbc_tdof_lists.back(), 0.0);
@@ -927,6 +930,7 @@ bool SpaceOperator::GetExcitationVector1(ComplexVector &RHS1)
 bool SpaceOperator::GetExcitationVector2(double omega, ComplexVector &RHS2)
 {
   RHS2.SetSize(GetNDSpace().GetTrueVSize());
+  RHS2.UseDevice(true);
   RHS2 = 0.0;
   bool nnz2 = AddExcitationVector2Internal(omega, RHS2);
   linalg::SetSubVector(RHS2, nd_dbc_tdof_lists.back(), 0.0);
@@ -983,6 +987,7 @@ bool SpaceOperator::AddExcitationVector2Internal(double omega, ComplexVector &RH
 void SpaceOperator::GetConstantInitialVector(ComplexVector &v)
 {
   v.SetSize(GetNDSpace().GetTrueVSize());
+  v.UseDevice(true);
   v = 1.0;
   linalg::SetSubVector(v.Real(), nd_dbc_tdof_lists.back(), 0.0);
 }
@@ -990,6 +995,7 @@ void SpaceOperator::GetConstantInitialVector(ComplexVector &v)
 void SpaceOperator::GetRandomInitialVector(ComplexVector &v)
 {
   v.SetSize(GetNDSpace().GetTrueVSize());
+  v.UseDevice(true);
   linalg::SetRandom(GetNDSpace().GetComm(), v);
   linalg::SetSubVector(v, nd_dbc_tdof_lists.back(), 0.0);
 }

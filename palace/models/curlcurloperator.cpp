@@ -178,6 +178,7 @@ void CurlCurlOperator::GetExcitationVector(int idx, Vector &RHS)
   SumVectorCoefficient fb(GetNDSpace().GetParMesh()->SpaceDimension());
   surf_j_op.AddExcitationBdrCoefficients(idx, fb);
   RHS.SetSize(GetNDSpace().GetTrueVSize());
+  RHS.UseDevice(true);
   RHS = 0.0;
   if (fb.empty())
   {

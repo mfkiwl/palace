@@ -101,6 +101,8 @@ StrumpackSolverBase<StrumpackSolverType>::StrumpackSolverBase(
     case config::LinearSolverData::CompressionType::NONE:
       break;
   }
+
+  // XXX TODO CONFIGURE GPU
 }
 
 template <typename StrumpackSolverType>

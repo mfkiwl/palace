@@ -272,7 +272,7 @@ void ArpackEigenvalueSolver::SetInitialSpace(const ComplexVector &v)
     r = std::make_unique<std::complex<double>[]>(n);
   }
   MFEM_VERIFY(v.Size() == n, "Invalid size mismatch for provided initial space vector!");
-  v.Get(r.get(), n);
+  v.Get(r.get(), n, false);
   info = 1;
 }
 
@@ -439,7 +439,7 @@ void ArpackEigenvalueSolver::GetEigenvector(int i, ComplexVector &x) const
               "Out of range eigenpair requested (i = " << i << ", nev = " << nev << ")!");
   MFEM_VERIFY(x.Size() == n, "Invalid size mismatch for provided eigenvector!");
   const int &j = perm.get()[i];
-  x.Set(V.get() + j * n, n);
+  x.Set(V.get() + j * n, n, false);
 }
 
 double ArpackEigenvalueSolver::GetError(int i, EigenvalueSolver::ErrorType type) const
@@ -492,6 +492,9 @@ void ArpackEPSSolver::SetOperators(const ComplexOperator &K, const ComplexOperat
   x.SetSize(opK->Height());
   y.SetSize(opK->Height());
   z.SetSize(opK->Height());
+  x.UseDevice(true);
+  y.UseDevice(true);
+  z.UseDevice(true);
   n = opK->Height();
 }
 
@@ -541,7 +544,7 @@ int ArpackEPSSolver::Solve()
   for (int i = 0; i < nev; i++)
   {
     const std::complex<double> l = eig.get()[i];
-    x.Set(V.get() + i * n, n);
+    x.Set(V.get() + i * n, n, false);
     opK->Mult(x, y);
     opM->AddMult(x, y, -l);
     res.get()[i] = linalg::Norml2(comm, y);
@@ -559,7 +562,8 @@ void ArpackEPSSolver::ApplyOp(const std::complex<double> *px,
   //               y = M⁻¹ K x .
   // Case 2: Shift-and-invert spectral transformation (opInv = (K - σ M)⁻¹)
   //               y = (K - σ M)⁻¹ M x .
-  x.Set(px, n);
+  // The input pointers are always to host memory (ARPACK runs on host).
+  x.Set(px, n, false);
   if (!sinvert)
   {
     opK->Mult(x, z);
@@ -578,18 +582,18 @@ void ArpackEPSSolver::ApplyOp(const std::complex<double> *px,
     opProj->Mult(y);
     // Mpi::Print(" After projection: {:e}\n", linalg::Norml2(comm, y));
   }
-  y.Get(py, n);
+  y.Get(py, n, false);
 }
 
 void ArpackEPSSolver::ApplyOpB(const std::complex<double> *px,
                                std::complex<double> *py) const
 {
   MFEM_VERIFY(opB, "No B operator for weighted inner product in ARPACK solve!");
-  x.Set(px, n);
+  x.Set(px, n, false);
   opB->Mult(x.Real(), y.Real());
   opB->Mult(x.Imag(), y.Imag());
   y *= delta * gamma;
-  y.Get(py, n);
+  y.Get(py, n, false);
 }
 
 double ArpackEPSSolver::GetBackwardScaling(std::complex<double> l) const
@@ -646,6 +650,11 @@ void ArpackPEPSolver::SetOperators(const ComplexOperator &K, const ComplexOperat
   y1.SetSize(opK->Height());
   y2.SetSize(opK->Height());
   z.SetSize(opK->Height());
+  x1.UseDevice(true);
+  x2.UseDevice(true);
+  y1.UseDevice(true);
+  y2.UseDevice(true);
+  z.UseDevice(true);
   n = opK->Height();
 }
 
@@ -702,7 +711,7 @@ int ArpackPEPSolver::Solve()
   {
     const std::complex<double> &l = eig.get()[i];
     ExtractEigenvector(l, W.get() + i * 2 * n, V.get() + i * n);
-    x1.Set(V.get() + i * n, n);
+    x1.Set(V.get() + i * n, n, false);
     opK->Mult(x1, y1);
     opC->AddMult(x1, y1, l);
     opM->AddMult(x1, y1, l * l);
@@ -724,8 +733,9 @@ void ArpackPEPSolver::ApplyOp(const std::complex<double> *px,
   // With:
   //               L₀ = [ -K  0 ]    L₁ = [ C  M ]
   //                    [  0  M ] ,       [ M  0 ] .
-  x1.Set(px, n);
-  x2.Set(px + n, n);
+  // The input pointers are always to host memory (ARPACK runs on host).
+  x1.Set(px, n, false);
+  x2.Set(px + n, n, false);
   if (!sinvert)
   {
     y1 = x2;
@@ -769,24 +779,24 @@ void ArpackPEPSolver::ApplyOp(const std::complex<double> *px,
       // Mpi::Print(" Before projection: {:e}\n", linalg::Norml2(comm, y2));
     }
   }
-  y1.Get(py, n);
-  y2.Get(py + n, n);
+  y1.Get(py, n, false);
+  y2.Get(py + n, n, false);
 }
 
 void ArpackPEPSolver::ApplyOpB(const std::complex<double> *px,
                                std::complex<double> *py) const
 {
   MFEM_VERIFY(opB, "No B operator for weighted inner product in ARPACK solve!");
-  x1.Set(px, n);
-  x2.Set(px + n, n);
+  x1.Set(px, n, false);
+  x2.Set(px + n, n, false);
   opB->Mult(x1.Real(), y1.Real());
   opB->Mult(x1.Imag(), y1.Imag());
   opB->Mult(x2.Real(), y2.Real());
   opB->Mult(x2.Imag(), y2.Imag());
   y1 *= delta * gamma * gamma;
   y2 *= delta * gamma * gamma;
-  y1.Get(py, n);
-  y2.Get(py + n, n);
+  y1.Get(py, n, false);
+  y2.Get(py + n, n, false);
 }
 
 double ArpackPEPSolver::GetBackwardScaling(std::complex<double> l) const
@@ -815,7 +825,7 @@ void ArpackPEPSolver::ExtractEigenvector(std::complex<double> l,
 {
   // Select the most accurate x for y = [x₁; x₂] from the linearized eigenvalue problem. Or,
   // just take x = x₁.
-  x1.Set(py, n);
+  x1.Set(py, n, false);
   if (opB)
   {
     linalg::Normalize(comm, x1, *opB, y1);
@@ -824,7 +834,7 @@ void ArpackPEPSolver::ExtractEigenvector(std::complex<double> l,
   {
     linalg::Normalize(comm, x1);
   }
-  x1.Get(px, n);
+  x1.Get(px, n, false);
 }
 
 }  // namespace palace::arpack

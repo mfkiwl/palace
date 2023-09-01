@@ -134,7 +134,9 @@ void DrivenSolver::SweepUniform(SpaceOperator &spaceop, PostOperator &postop, in
 
   // Set up RHS vector for the incident field at port boundaries, and the vector for the
   // first frequency step.
-  ComplexVector RHS(Curl->Width()), E(Curl->Width()), B(Curl->Height());
+  ComplexVector E(Curl->Width()), B(Curl->Height()), RHS;
+  E.UseDevice(true);
+  B.UseDevice(true);
   E = 0.0;
   B = 0.0;
 
@@ -235,6 +237,8 @@ void DrivenSolver::SweepAdaptive(SpaceOperator &spaceop, PostOperator &postop, i
   // high-dimensional field solution.
   auto Curl = spaceop.GetCurlMatrix<ComplexOperator>();
   ComplexVector E(Curl->Width()), B(Curl->Height());
+  E.UseDevice(true);
+  B.UseDevice(true);
   E = 0.0;
   B = 0.0;
 

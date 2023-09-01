@@ -3,8 +3,6 @@
 
 #include "rap.hpp"
 
-#include <mfem/general/forall.hpp>
-
 namespace palace
 {
 
@@ -21,6 +19,9 @@ ParOperator::ParOperator(std::unique_ptr<Operator> &&dA, Operator *pA,
   lx.SetSize(A->Width());
   ly.SetSize(A->Height());
   ty.SetSize(width);
+  lx.UseDevice(true);
+  ly.UseDevice(true);
+  ty.UseDevice(true);
 }
 
 ParOperator::ParOperator(std::unique_ptr<Operator> &&A,
@@ -59,6 +60,7 @@ void ParOperator::SetEssentialTrueDofs(const mfem::Array<int> &tdof_list,
   MFEM_VERIFY(height == width, "Set essential true dofs for both test and trial spaces "
                                "for rectangular ParOperator!");
   dbc_tdof_list = &tdof_list;
+  dbc_tdof_list->Read(true);  // Copy to device
   diag_policy = policy;
 }
 
@@ -68,6 +70,7 @@ void ParOperator::AssembleDiagonal(Vector &diag) const
   // entry-wise absolute values of the conforming prolongation operator.
   MFEM_VERIFY(&trial_fespace == &test_fespace,
               "Diagonal assembly is only available for square ParOperator!");
+  diag.UseDevice(true);
   if (const auto *bfA = dynamic_cast<const mfem::BilinearForm *>(A))
   {
     if (bfA->HasSpMat())
@@ -398,6 +401,9 @@ ComplexParOperator::ComplexParOperator(std::unique_ptr<Operator> &&dAr,
   lx.SetSize(A->Width());
   ly.SetSize(A->Height());
   ty.SetSize(width);
+  lx.UseDevice(true);
+  ly.UseDevice(true);
+  ty.UseDevice(true);
 }
 
 ComplexParOperator::ComplexParOperator(std::unique_ptr<Operator> &&Ar,
@@ -443,6 +449,7 @@ void ComplexParOperator::SetEssentialTrueDofs(const mfem::Array<int> &tdof_list,
   MFEM_VERIFY(height == width, "Set essential true dofs for both test and trial spaces "
                                "for rectangular ComplexParOperator!");
   dbc_tdof_list = &tdof_list;
+  dbc_tdof_list->Read(true);  // Copy to device
   diag_policy = policy;
   if (RAPr)
   {
@@ -451,6 +458,20 @@ void ComplexParOperator::SetEssentialTrueDofs(const mfem::Array<int> &tdof_list,
   if (RAPi)
   {
     RAPi->SetEssentialTrueDofs(tdof_list, Operator::DiagonalPolicy::DIAG_ZERO);
+  }
+}
+
+void ComplexParOperator::AssembleDiagonal(ComplexVector &diag) const
+{
+  diag.UseDevice(true);
+  diag = 0.0;
+  if (RAPr)
+  {
+    RAPr->AssembleDiagonal(diag.Real());
+  }
+  if (RAPi)
+  {
+    RAPi->AssembleDiagonal(diag.Imag());
   }
 }
 

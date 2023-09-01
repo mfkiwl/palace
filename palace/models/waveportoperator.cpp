@@ -309,15 +309,13 @@ void GetInitialSpace(mfem::ParFiniteElementSpace &nd_fespace,
   // Note: When the eigenvalue solver uses a standard ℓ²-inner product instead of B-inner
   // product (since we use a general non-Hermitian solver due to complex symmetric B), then
   // we just use v0 = y0 directly.
-  v.SetSize(nd_fespace.GetTrueVSize() + h1_fespace.GetTrueVSize());
+  const int nd_size = nd_fespace.GetTrueVSize(), h1_size = h1_fespace.GetTrueVSize();
+  v.SetSize(nd_size + h1_size);
+  v.UseDevice(true);
   // linalg::SetRandomReal(nd_fespace.GetComm(), v);
   v = std::complex<double>(1.0, 0.0);
   linalg::SetSubVector(v, nd_dbc_tdof_list, 0.0);
-  for (int i = nd_fespace.GetTrueVSize();
-       i < nd_fespace.GetTrueVSize() + h1_fespace.GetTrueVSize(); i++)
-  {
-    v.Real()[i] = v.Imag()[i] = 0.0;
-  }
+  linalg::SetSubVector(v, nd_size, nd_size + h1_size, 0.0);
 }
 
 void NormalizeWithSign(const mfem::ParGridFunction &S0t, mfem::ParComplexGridFunction &E0t,
@@ -628,6 +626,9 @@ WavePortData::WavePortData(const config::WavePortData &data, const MaterialOpera
   e0.SetSize(v0.Size());
   e0t.SetSize(port_nd_fespace->GetTrueVSize());
   e0n.SetSize(port_h1_fespace->GetTrueVSize());
+  e0.UseDevice(true);
+  e0t.UseDevice(true);
+  e0n.UseDevice(true);
 
   // Configure a communicator for the processes which have elements for this port.
   MPI_Comm comm = nd_fespace.GetComm();
@@ -869,12 +870,15 @@ void WavePortData::Initialize(double omega)
   // electric field variables: Eₜ = eₜ/kₙ and Eₙ = ieₙ.
   if (port_comm != MPI_COMM_NULL)
   {
-    Vector e0tr, e0ti, e0nr, e0ni;
     eigen->GetEigenvector(mode_idx - 1, e0);
-    e0tr.MakeRef(e0.Real(), 0, e0t.Size());
-    e0nr.MakeRef(e0.Real(), e0t.Size(), e0n.Size());
-    e0ti.MakeRef(e0.Imag(), 0, e0t.Size());
-    e0ni.MakeRef(e0.Imag(), e0t.Size(), e0n.Size());
+    Vector e0tr(e0.Real(), 0, e0t.Size());
+    Vector e0ti(e0.Imag(), 0, e0t.Size());
+    Vector e0nr(e0.Real(), e0t.Size(), e0n.Size());
+    Vector e0ni(e0.Imag(), e0t.Size(), e0n.Size());
+    e0tr.UseDevice(true);
+    e0ti.UseDevice(true);
+    e0nr.UseDevice(true);
+    e0nr.UseDevice(true);
     e0t.Real() = e0tr;
     e0t.Imag() = e0ti;
     e0n.Real() = e0nr;
@@ -891,6 +895,8 @@ void WavePortData::Initialize(double omega)
   port_E0t->imag().SetFromTrueDofs(e0t.Imag());
   port_E0n->real().SetFromTrueDofs(e0n.Real());
   port_E0n->imag().SetFromTrueDofs(e0n.Imag());
+
+  // XX TODO UNSURE IF NEED DEVICE-HOST TRANSFER HERE
 
   // Normalize the mode for a chosen polarization direction and unit power, |E x H⋆| ⋅ n,
   // integrated over the port surface (+n is the direction of propagation).

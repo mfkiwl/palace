@@ -82,6 +82,8 @@ DivFreeSolver::DivFreeSolver(const MaterialOperator &mat_op,
 
   psi.SetSize(h1_fespaces.GetFinestFESpace().GetTrueVSize());
   rhs.SetSize(h1_fespaces.GetFinestFESpace().GetTrueVSize());
+  psi.UseDevice(true);
+  rhs.UseDevice(true);
 }
 
 }  // namespace palace

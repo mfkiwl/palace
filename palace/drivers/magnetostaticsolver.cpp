@@ -53,6 +53,7 @@ void MagnetostaticSolver::Solve(std::vector<std::unique_ptr<mfem::ParMesh>> &mes
     // Form and solve the linear system for a prescribed current on the specified source.
     Mpi::Print("\n");
     A[step].SetSize(RHS.Size());
+    A[step].UseDevice(true);
     A[step] = 0.0;
     curlcurlop.GetExcitationVector(idx, RHS);
 
