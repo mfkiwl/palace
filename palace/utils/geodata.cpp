@@ -1124,7 +1124,7 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
   constexpr bool generate_bdr = false, generate_edges = true, refine = true, fix_orientation = true;
   std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
-  if constexpr (true)
+  if constexpr (false)
   {
     // Write the serial mesh to a stream and read that through the Mesh constructor.
     std::stringstream msg;
@@ -1146,21 +1146,8 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
     // Directly ingest the generated Mesh.
     smesh = std::make_unique<mfem::Mesh>(mesh->GetSerialMesh(0));
 
-    // std::stringstream msg;
-    // msg.precision(MSH_FLT_PRECISION);
-    // mesh->PrintAsSerial(msg);
-    // if (Mpi::Root(comm))
-    // {
-    //   Mpi::Print("Direct processed mesh\n");
-    //   smesh->PrintCharacteristics();
-    //   auto smesh2 = std::make_unique<mfem::Mesh>(msg, generate_edges, refine, fix_orientation);
-    //   Mpi::Print("Stream processed mesh\n");
-    //   smesh2->PrintCharacteristics();
-    // }
-
     Mpi::Barrier(comm);
     mesh.reset(); // Release the no longer needed memory.
-
     if (Mpi::Rank(comm) != 0)
     {
       smesh.reset();
