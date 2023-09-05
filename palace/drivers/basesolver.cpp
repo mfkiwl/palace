@@ -154,23 +154,9 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
     }
   }
 
-  // All mesh corrections should have been performed during the initial mesh load, so we do
-  // not allow any additional modifications.
-  mesh->FinalizeTopology(false);
-  mesh->Finalize(true, true);
-
   // If the mesh is higher order, synchronize through the nodal grid function.
   // This will in turn call the mesh exchange of face neighbor data.
-  if (mesh->GetNodes())
-  {
-    auto *pgf = dynamic_cast<mfem::ParGridFunction *>(mesh->GetNodes());
-    MFEM_ASSERT(pgf, "The grid function must be castable to a ParGridFunction");
-    pgf->ExchangeFaceNbrData();
-  }
-  else
-  {
-    mesh->ExchangeFaceNbrData();
-  }
+  mesh->ExchangeFaceNbrData();
 }
 
 }  // namespace
@@ -219,9 +205,10 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
 
   if (use_amr && mesh.size() > 1)
   {
-    Mpi::Warning("{}\n", "Flattening mesh sequence: AMR will solve only use the final "
-                         "mesh from the refinement sequence.");
+    Mpi::Warning("{}\n", "Flattening mesh sequence: AMR will start from the final mesh from the refinement sequence.");
     mesh.erase(mesh.begin(), mesh.end() - 1);
+    constexpr bool refine = true, fix_orientation = true;
+    mesh.back()->Finalize(refine, fix_orientation);
   }
 
   int iter = 0;
