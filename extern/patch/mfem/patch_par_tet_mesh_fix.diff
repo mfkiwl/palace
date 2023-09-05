@@ -1,5 +1,5 @@
 diff --git a/fem/pfespace.cpp b/fem/pfespace.cpp
-index fa6a31a9e..4d64559c6 100644
+index 5027cb17e..8468c7fbd 100644
 --- a/fem/pfespace.cpp
 +++ b/fem/pfespace.cpp
 @@ -43,7 +43,7 @@ ParFiniteElementSpace::ParFiniteElementSpace(
@@ -12,7 +12,7 @@ index fa6a31a9e..4d64559c6 100644
     : FiniteElementSpace(pm, MakeLocalNURBSext(global_fes->GetNURBSext(),
                                                pm->NURBSext),
 diff --git a/fem/pfespace.hpp b/fem/pfespace.hpp
-index 1fbc7ccd1..ee82b0891 100644
+index 8f574670b..80a1a9501 100644
 --- a/fem/pfespace.hpp
 +++ b/fem/pfespace.hpp
 @@ -247,14 +247,11 @@ public:
@@ -48,10 +48,10 @@ index d49187457..0a58530c1 100644
  
     if (partitioning)
 diff --git a/mesh/mesh.cpp b/mesh/mesh.cpp
-index 45871a66e..18e6bf1a7 100644
+index f875c182e..9b8587547 100644
 --- a/mesh/mesh.cpp
 +++ b/mesh/mesh.cpp
-@@ -2451,12 +2451,38 @@ void Mesh::MarkTriMeshForRefinement()
+@@ -2452,7 +2452,7 @@ void Mesh::MarkTriMeshForRefinement()
     }
  }
  
@@ -60,45 +60,7 @@ index 45871a66e..18e6bf1a7 100644
  {
     NumOfEdges = v_to_v.NumberOfEntries();
     order.SetSize(NumOfEdges);
-    Array<Pair<double, int> > length_idx(NumOfEdges);
- 
-+   auto GetLength = [this](int i, int j)
-+   {
-+      double length = 0.;
-+      if (Nodes == NULL)
-+      {
-+         const double *vi = vertices[i]();
-+         const double *vj = vertices[j]();
-+         for (int k = 0; k < spaceDim; k++)
-+         {
-+            length += (vi[k]-vj[k])*(vi[k]-vj[k]);
-+         }
-+      }
-+      else
-+      {
-+         Array<int> ivdofs, jvdofs;
-+         Nodes->FESpace()->GetVertexVDofs(i, ivdofs);
-+         Nodes->FESpace()->GetVertexVDofs(j, jvdofs);
-+         for (int k = 0; k < ivdofs.Size(); k++)
-+         {
-+            length += ((*Nodes)(ivdofs[k])-(*Nodes)(jvdofs[k]))*
-+                      ((*Nodes)(ivdofs[k])-(*Nodes)(jvdofs[k]));
-+         }
-+      }
-+      return length;
-+   };
-+
-    for (int i = 0; i < NumOfVertices; i++)
-    {
-       for (DSTable::RowIterator it(v_to_v, i); !it; ++it)
-@@ -2472,11 +2498,13 @@ void Mesh::GetEdgeOrdering(DSTable &v_to_v, Array<int> &order)
- 
-    for (int i = 0; i < NumOfEdges; i++)
-    {
--      order[length_idx[i].two] = i;
-+      int j = i;
-+      while (j > 0 && length_idx[j-1].one == length_idx[i].one) { j--; }
-+      order[length_idx[i].two] = j;
+@@ -2477,7 +2477,7 @@ void Mesh::GetEdgeOrdering(DSTable &v_to_v, Array<int> &order)
     }
  }
  
@@ -107,110 +69,8 @@ index 45871a66e..18e6bf1a7 100644
  {
     // Mark the longest tetrahedral edge by rotating the indices so that
     // vertex 0 - vertex 1 is the longest edge in the element.
-@@ -5718,37 +5746,21 @@ static const char *fixed_or_not[] = { "fixed", "NOT FIXED" };
- 
- int Mesh::CheckElementOrientation(bool fix_it)
- {
--   int i, j, k, wo = 0, fo = 0;
--   double *v[4];
-+   int wo = 0, fo = 0;
- 
-    if (Dim == 2 && spaceDim == 2)
-    {
-       DenseMatrix J(2, 2);
- 
--      for (i = 0; i < NumOfElements; i++)
-+      for (int i = 0; i < NumOfElements; i++)
-       {
--         int *vi = elements[i]->GetVertices();
--         if (Nodes == NULL)
--         {
--            for (j = 0; j < 3; j++)
--            {
--               v[j] = vertices[vi[j]]();
--            }
--            for (j = 0; j < 2; j++)
--               for (k = 0; k < 2; k++)
--               {
--                  J(j, k) = v[j+1][k] - v[0][k];
--               }
--         }
--         else
--         {
--            // only check the Jacobian at the center of the element
--            GetElementJacobian(i, J);
--         }
-+         // only check the Jacobian at the center of the element
-+         GetElementJacobian(i, J);
-          if (J.Det() < 0.0)
-          {
-             if (fix_it)
-             {
-+               int *vi = elements[i]->GetVertices();
-                switch (GetElementType(i))
-                {
-                   case Element::TRIANGLE:
-@@ -5773,29 +5785,14 @@ int Mesh::CheckElementOrientation(bool fix_it)
-    {
-       DenseMatrix J(3, 3);
- 
--      for (i = 0; i < NumOfElements; i++)
-+      for (int i = 0; i < NumOfElements; i++)
-       {
-          int *vi = elements[i]->GetVertices();
-          switch (GetElementType(i))
-          {
-             case Element::TETRAHEDRON:
--               if (Nodes == NULL)
--               {
--                  for (j = 0; j < 4; j++)
--                  {
--                     v[j] = vertices[vi[j]]();
--                  }
--                  for (j = 0; j < 3; j++)
--                     for (k = 0; k < 3; k++)
--                     {
--                        J(j, k) = v[j+1][k] - v[0][k];
--                     }
--               }
--               else
--               {
--                  // only check the Jacobian at the center of the element
--                  GetElementJacobian(i, J);
--               }
-+               // only check the Jacobian at the center of the element
-+               GetElementJacobian(i, J);
-                if (J.Det() < 0.0)
-                {
-                   wo++;
-@@ -6686,24 +6683,12 @@ void Mesh::GetBdrPointMatrix(int i,DenseMatrix &pointmat) const
- 
-    pointmat.SetSize(spaceDim, nv);
-    for (k = 0; k < spaceDim; k++)
-+   {
-       for (j = 0; j < nv; j++)
-       {
-          pointmat(k, j) = vertices[v[j]](k);
-       }
--}
--
--double Mesh::GetLength(int i, int j) const
--{
--   const double *vi = vertices[i]();
--   const double *vj = vertices[j]();
--   double length = 0.;
--
--   for (int k = 0; k < spaceDim; k++)
--   {
--      length += (vi[k]-vj[k])*(vi[k]-vj[k]);
-    }
--
--   return sqrt(length);
- }
- 
- // static method
 diff --git a/mesh/mesh.hpp b/mesh/mesh.hpp
-index 419745f1b..d148358c2 100644
+index 419745f1b..cd26f5474 100644
 --- a/mesh/mesh.hpp
 +++ b/mesh/mesh.hpp
 @@ -32,8 +32,6 @@
@@ -241,13 +101,8 @@ index 419745f1b..d148358c2 100644
  #ifdef MFEM_USE_ADIOS2
     friend class adios2stream;
  #endif
-@@ -334,13 +332,10 @@ protected:
-    /** Also, initializes #mesh_geoms. */
-    void SetMeshGen();
+@@ -339,8 +337,8 @@ protected:
  
--   /// Return the length of the segment from node i to node j.
--   double GetLength(int i, int j) const;
--
     void MarkForRefinement();
     void MarkTriMeshForRefinement();
 -   void GetEdgeOrdering(DSTable &v_to_v, Array<int> &order);
@@ -258,7 +113,7 @@ index 419745f1b..d148358c2 100644
     // Methods used to prepare and apply permutation of the mesh nodes assuming
     // that the mesh elements may be rotated (e.g. to mark triangle or tet edges
 diff --git a/mesh/pmesh.cpp b/mesh/pmesh.cpp
-index 4d08285e9..356a13666 100644
+index 4d08285e9..a7b1f7523 100644
 --- a/mesh/pmesh.cpp
 +++ b/mesh/pmesh.cpp
 @@ -923,22 +923,21 @@ void ParMesh::FinalizeParTopo()
@@ -280,10 +135,10 @@ index 4d08285e9..356a13666 100644
  
 -   have_face_nbr_data = false;
 -   pncmesh = NULL;
--
--   const int gen_edges = 1;
 +   Load(input, generate_edges, refine, fix_orientation);
  
+-   const int gen_edges = 1;
+-
 -   Load(input, gen_edges, refine, true);
 +   have_face_nbr_data = false;
  }
@@ -306,40 +161,7 @@ index 4d08285e9..356a13666 100644
  
     Array<int> sedge_ord(shared_edges.Size());
     Array<Pair<int,int> > sedge_ord_map(shared_edges.Size());
-@@ -1785,6 +1784,32 @@ void ParMesh::MarkTetMeshForRefinement(DSTable &v_to_v)
-    {
-       Array<Pair<int, double> > ilen_len(order.Size());
- 
-+      auto GetLength = [this](int i, int j)
-+      {
-+         double length = 0.;
-+         if (Nodes == NULL)
-+         {
-+            const double *vi = vertices[i]();
-+            const double *vj = vertices[j]();
-+            for (int k = 0; k < spaceDim; k++)
-+            {
-+               length += (vi[k]-vj[k])*(vi[k]-vj[k]);
-+            }
-+         }
-+         else
-+         {
-+            Array<int> ivdofs, jvdofs;
-+            Nodes->FESpace()->GetVertexVDofs(i, ivdofs);
-+            Nodes->FESpace()->GetVertexVDofs(j, jvdofs);
-+            for (int k = 0; k < ivdofs.Size(); k++)
-+            {
-+               length += ((*Nodes)(ivdofs[k])-(*Nodes)(jvdofs[k]))*
-+                         ((*Nodes)(ivdofs[k])-(*Nodes)(jvdofs[k]));
-+            }
-+         }
-+         return length;
-+      };
-+
-       for (int i = 0; i < NumOfVertices; i++)
-       {
-          for (DSTable::RowIterator it(v_to_v, i); !it; ++it)
-@@ -1797,23 +1822,26 @@ void ParMesh::MarkTetMeshForRefinement(DSTable &v_to_v)
+@@ -1797,23 +1796,26 @@ void ParMesh::MarkTetMeshForRefinement(DSTable &v_to_v)
  
        SortPairs<int, double>(ilen_len, order.Size());
  
@@ -371,7 +193,7 @@ index 4d08285e9..356a13666 100644
        }
  #endif
     }
-@@ -2102,16 +2130,13 @@ void ParMesh::EnsureParNodes()
+@@ -2102,16 +2104,13 @@ void ParMesh::EnsureParNodes()
        ParFiniteElementSpace *pfes =
           new ParFiniteElementSpace(*Nodes->FESpace(), *this);
        ParGridFunction *new_nodes = new ParGridFunction(pfes);
@@ -388,7 +210,7 @@ index 4d08285e9..356a13666 100644
        delete Nodes;
        Nodes = new_nodes;
     }
-@@ -3288,23 +3313,21 @@ void ParMesh::ReorientTetMesh()
+@@ -3288,23 +3287,21 @@ void ParMesh::ReorientTetMesh()
  
     // create a GroupCommunicator over shared vertices
     GroupCommunicator svert_comm(gtopo);
@@ -418,7 +240,7 @@ index 4d08285e9..356a13666 100644
  
     // the pairs (master rank, master local index) define a globally consistent
     // vertex ordering
-@@ -3370,22 +3393,8 @@ void ParMesh::ReorientTetMesh()
+@@ -3370,22 +3367,8 @@ void ParMesh::ReorientTetMesh()
     {
        // create a GroupCommunicator on the shared triangles
        GroupCommunicator stria_comm(gtopo);
