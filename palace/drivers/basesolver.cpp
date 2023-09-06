@@ -205,7 +205,7 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
 
   if (use_amr && mesh.size() > 1)
   {
-    Mpi::Warning("{}\n", "Flattening mesh sequence: AMR will start from the final mesh from the refinement sequence.");
+    Mpi::Warning("{}\n", "Flattening mesh sequence: AMR will start from the final mesh in the refinement sequence.");
     mesh.erase(mesh.begin(), mesh.end() - 1);
     constexpr bool refine = true, fix_orientation = true;
     mesh.back()->Finalize(refine, fix_orientation);

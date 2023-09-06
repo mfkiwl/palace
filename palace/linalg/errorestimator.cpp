@@ -27,7 +27,7 @@ CurlFluxErrorEstimator::CurlFluxErrorEstimator(
     smooth_flux_fes(ConstructFiniteElementSpaceHierarchy<mfem::ND_FECollection>(
         iodata.solver.linear.mg_max_levels, iodata.solver.linear.mg_legacy_transfer,
         iodata.solver.pa_order_threshold, mesh, smooth_flux_fecs)),
-    smooth_projector(smooth_flux_fes, iodata.solver.linear.tol, 200, 0,
+    smooth_projector(smooth_flux_fes, iodata.solver.linear.tol, 500, 0,
                      iodata.solver.pa_order_threshold),
     coarse_flux_fec(iodata.solver.order, mesh.back()->Dimension(),
                     mfem::BasisType::GaussLobatto),
@@ -334,7 +334,7 @@ GradFluxErrorEstimator::GradFluxErrorEstimator(
             iodata.solver.pa_order_threshold, mesh, smooth_flux_fecs)),
     smooth_flux_fes(mesh.back().get(), smooth_flux_fecs.back().get(),
                     mesh.back()->Dimension()),
-    smooth_projector(smooth_flux_component_fes, iodata.solver.linear.tol, 200, 0,
+    smooth_projector(smooth_flux_component_fes, iodata.solver.linear.tol, 500, 0,
                      iodata.solver.pa_order_threshold),
     coarse_flux_fec(iodata.solver.order, mesh.back()->Dimension(),
                     mfem::BasisType::GaussLobatto),

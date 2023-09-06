@@ -11,13 +11,13 @@
     "L0": 1.0e-2,  // cm
     "Refinement":
     {
-      // "UniformLevels": 2,
+      "UniformLevels": 0,
       "Adaptation":
       {
-        "MaxIts": 5,
+        "MaxIts": 1,
         "Tol": 1e-4,
         "UpdateFraction": 0.4,
-        "Nonconformal": true,
+        "Nonconformal": false,
         "DOFLimit": 1e6,
         "SaveStep": 1
       }
