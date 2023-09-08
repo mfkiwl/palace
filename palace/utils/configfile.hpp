@@ -156,6 +156,12 @@ struct AdaptiveRefinementData
   // Maximum allowable ratio of number of elements across processors before
   // rebalancing is performed.
   double maximum_imbalance = 1.0;
+  // Whether to write a serialized mesh to file after mesh modification.
+  bool write_serial_mesh = true;
+  // Whether to write the refined mesh to file in parallel, before rebalancing.
+  bool write_pre_balance_mesh = false;
+  // Whether to write the refined mesh to file in parallel, after rebalancing.
+  bool write_post_balance_mesh = false;
 };
 
 struct RefinementData

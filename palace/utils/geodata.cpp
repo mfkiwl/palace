@@ -92,7 +92,8 @@ std::unique_ptr<mfem::ParMesh> ReadMesh(MPI_Comm comm, const IoData &iodata, boo
   std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
   const auto use_amr = iodata.model.refinement.adaptation.max_its > 0;
-  const bool use_mesh_partitioner = !use_amr || !iodata.model.refinement.adaptation.nonconformal;
+  const bool use_mesh_partitioner =
+      !use_amr || !iodata.model.refinement.adaptation.nonconformal;
   if (Mpi::Root(comm) || !use_mesh_partitioner)
   {
     // If using the mesh partitioner, only the root node needs to load the mesh.
@@ -1116,12 +1117,14 @@ void GetSurfaceNormal(mfem::ParMesh &mesh, const mfem::Array<int> &marker,
   // }
 }
 
-void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
+void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh,
+                            const std::string &output_serial_mesh_file)
 {
   // Write the parallel mesh to a stream as a serial mesh, then read back in and partition
   // using METIS.
   auto comm = mesh->GetComm();
-  constexpr bool generate_bdr = false, generate_edges = true, refine = true, fix_orientation = true;
+  constexpr bool generate_bdr = false, generate_edges = true, refine = true,
+                 fix_orientation = true;
   std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
   if constexpr (false)
@@ -1129,13 +1132,13 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
     // Write the serial mesh to a stream and read that through the Mesh constructor.
     std::stringstream msg;
     msg.precision(MSH_FLT_PRECISION);
-    std::ofstream dumpmesh("dump.msh");
-    dumpmesh.precision(MSH_FLT_PRECISION);
     mesh->PrintAsSerial(msg);
-    Mpi::Barrier(comm);
-    mesh->PrintAsSerial(dumpmesh);
-    Mpi::Barrier(comm);
-    mesh.reset(); // Release the no longer needed memory.
+    if (!output_serial_mesh_file.empty())
+    {
+      std::ofstream serial(output_serial_mesh_file);
+      mesh->PrintAsSerial(serial);
+    }
+    mesh.reset();  // Release the no longer needed memory.
     if (Mpi::Root(comm))
     {
       smesh = std::make_unique<mfem::Mesh>(msg, generate_edges, refine, fix_orientation);
@@ -1147,10 +1150,15 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh)
     smesh = std::make_unique<mfem::Mesh>(mesh->GetSerialMesh(0));
 
     Mpi::Barrier(comm);
-    mesh.reset(); // Release the no longer needed memory.
+    mesh.reset();  // Release the no longer needed memory.
     if (Mpi::Rank(comm) != 0)
     {
       smesh.reset();
+    }
+    else if (!output_serial_mesh_file.empty())
+    {
+      std::ofstream serial(output_serial_mesh_file);
+      smesh->Print(serial);
     }
   }
 
@@ -1579,8 +1587,7 @@ std::map<int, std::array<int, 2>> CheckMesh(mfem::Mesh &orig_mesh,
     // 1-based, some boundary attributes may be empty since they were removed from the
     // original mesh, but to keep indices the same as config file we don't compact the
     // list.
-    int max_bdr_attr =
-        orig_mesh.bdr_attributes.Size() ? orig_mesh.bdr_attributes.Max() : 0;
+    int max_bdr_attr = orig_mesh.bdr_attributes.Size() ? orig_mesh.bdr_attributes.Max() : 0;
     for (int f = 0; f < orig_mesh.GetNumFaces(); f++)
     {
       if (add_bdr_faces[f] > 0)
@@ -1723,7 +1730,8 @@ std::unique_ptr<mfem::ParMesh> DistributeMesh(MPI_Comm comm,
     }
 
     // Each process loads its own partitioned mesh file and constructs the parallel mesh.
-    std::string pfile = mfem::MakeParFilename(tmp + "part.", Mpi::Rank(comm), ".mesh", width);
+    std::string pfile =
+        mfem::MakeParFilename(tmp + "part.", Mpi::Rank(comm), ".mesh", width);
     int exists = 0;
     while (!exists)  // Wait for root to finish writing all files
     {
@@ -1775,8 +1783,8 @@ std::unique_ptr<mfem::ParMesh> DistributeMesh(MPI_Comm comm,
         }
       }
       std::istringstream fi(so[0]);  // This is never compressed
-      pmesh =
-          std::make_unique<mfem::ParMesh>(comm, fi, generate_edges, refine, fix_orientation);
+      pmesh = std::make_unique<mfem::ParMesh>(comm, fi, generate_edges, refine,
+                                              fix_orientation);
       MPI_Waitall(static_cast<int>(send_requests.size()), send_requests.data(),
                   MPI_STATUSES_IGNORE);
     }
@@ -1791,8 +1799,8 @@ std::unique_ptr<mfem::ParMesh> DistributeMesh(MPI_Comm comm,
       MPI_Recv(si.data(), rlen, MPI_CHAR, 0, Mpi::Rank(comm), comm, MPI_STATUS_IGNORE);
       std::istringstream fi(si);
       // std::istringstream fi(zlib::DecompressString(si));
-      pmesh =
-          std::make_unique<mfem::ParMesh>(comm, fi, generate_edges, refine, fix_orientation);
+      pmesh = std::make_unique<mfem::ParMesh>(comm, fi, generate_edges, refine,
+                                              fix_orientation);
     }
     return pmesh;
   }

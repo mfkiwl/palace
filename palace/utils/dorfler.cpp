@@ -86,8 +86,8 @@ double ComputeDorflerThreshold(double fraction, const mfem::Vector &e)
   Mpi::GlobalSum(1, &min_error_marked, comm);
   Mpi::GlobalSum(1, &max_error_marked, comm);
 
-  constexpr int maxiter = 100;  // Maximum limit to prevent runaway.
-  for (int i = 0; i < maxiter; ++i)
+  constexpr int maxiter = 100;  // Maximum limit to prevent runaway
+  for (int i = 0; i < maxiter; i++)
   {
     error_threshold = (min_threshold + max_threshold) / 2;
 
@@ -102,12 +102,16 @@ double ComputeDorflerThreshold(double fraction, const mfem::Vector &e)
 
     const auto candidate_fraction = error_marked / total_error;
 
-    Mpi::Debug("Threshold: {:e} < {:e} < {:e}, Marked Elems: {} <= {} <= {}\n",
-               min_threshold, error_threshold, max_threshold, min_elem_marked, elem_marked,
-               max_elem_marked);
+    if constexpr (false)
+    {
+      Mpi::Debug("Threshold: {:e} < {:e} < {:e}, Marked Elems: {} <= {} <= {}\n",
+                 min_threshold, error_threshold, max_threshold, min_elem_marked,
+                 elem_marked, max_elem_marked);
+    }
 
     // Set the tolerance based off of the largest local indicator value. These
-    // tolerance values are chosen based on testing, opt not to expose them.
+    // tolerance values are chosen based on testing, opt not to expose them. The maximum
+    // iteration count prevents an infinite loop.
     constexpr double frac_tol = 2 * std::numeric_limits<double>::epsilon();
     const double error_tol = 2 * std::numeric_limits<double>::epsilon() * max_indicator;
     if (std::abs(max_threshold - min_threshold) < error_tol ||
@@ -116,10 +120,13 @@ double ComputeDorflerThreshold(double fraction, const mfem::Vector &e)
     {
       // Candidate fraction matches to tolerance, or the number of marked
       // elements is no longer changing.
-      Mpi::Debug(
-          "ΔFraction: {:.3e}, Tol {:.3e}, ΔThreshold: {:.3e}, Tol {:.3e},  ΔElements: {}\n",
-          candidate_fraction - fraction, frac_tol, max_threshold - min_threshold, error_tol,
-          max_elem_marked - min_elem_marked);
+      if constexpr (false)
+      {
+        Mpi::Debug("ΔFraction: {:.3e}, Tol {:.3e}, ΔThreshold: {:.3e}, Tol {:.3e},  "
+                   "ΔElements: {}\n",
+                   candidate_fraction - fraction, frac_tol, max_threshold - min_threshold,
+                   error_tol, max_elem_marked - min_elem_marked);
+      }
       break;
     }
 
@@ -146,7 +153,6 @@ double ComputeDorflerThreshold(double fraction, const mfem::Vector &e)
   // of elements and fraction of the total error. Would rather over mark than
   // under mark, as Dorfler marking is the smallest set that covers AT LEAST the
   // specified fraction of the error.
-
   error_threshold = min_threshold;
   elem_marked = max_elem_marked;
   error_marked = max_error_marked;

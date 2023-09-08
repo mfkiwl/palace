@@ -340,9 +340,9 @@ void PostOperator::SetAGridFunction(const Vector &a)
 
 void PostOperator::SetIndicatorGridFunction(const Vector &i)
 {
-  // MFEM_VERIFY(indicator_field, "Incorrect usage of PostOperator::SetIndicatorGridFunction!");
-  // indicator_field->SetFromTrueDofs(i);
-  // indicator_field->ExchangeFaceNbrData();
+  MFEM_VERIFY(indicator_field, "Incorrect usage of PostOperator::SetIndicatorGridFunction!");
+  indicator_field->SetFromTrueDofs(i);
+  indicator_field->ExchangeFaceNbrData();
 }
 
 void PostOperator::UpdatePorts(const LumpedPortOperator &lumped_port_op, double omega)

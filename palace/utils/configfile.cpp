@@ -413,6 +413,12 @@ void RefinementData::SetUp(json &model)
     adaptation.nonconformal = adapt->value("Nonconformal", adaptation.nonconformal);
     adaptation.maximum_imbalance =
         adapt->value("MaximumImbalance", adaptation.maximum_imbalance);
+    adaptation.write_serial_mesh =
+        adapt->value("WriteSerialMesh", adaptation.write_serial_mesh);
+    adaptation.write_pre_balance_mesh =
+        adapt->value("WritePreBalanceMesh", adaptation.write_pre_balance_mesh);
+    adaptation.write_post_balance_mesh =
+        adapt->value("WritePostBalanceMesh", adaptation.write_post_balance_mesh);
 
     // Perform Checks
     MFEM_VERIFY(adaptation.tolerance > 0, "\"Tol\" must be strictly positive");
@@ -432,9 +438,19 @@ void RefinementData::SetUp(json &model)
                 "\"MaximumImbalance\" must be greater than or equal to 1");
 
     // Cleanup
-    const auto fields = {
-        "Tol",         "MaxIts",   "MinIts",   "UpdateFraction", "CoarseningFraction",
-        "MaxNCLevels", "DOFLimit", "SaveStep", "Nonconformal",   "MaximumImbalance"};
+    const auto fields = {"Tol",
+                         "MaxIts",
+                         "MinIts",
+                         "UpdateFraction",
+                         "CoarseningFraction",
+                         "MaxNCLevels",
+                         "DOFLimit",
+                         "SaveStep",
+                         "Nonconformal",
+                         "MaximumImbalance",
+                         "WriteSerialMesh",
+                         "WritePreBalanceMesh",
+                         "WritePostBalanceMesh"};
     for (const auto &f : fields)
     {
       adapt->erase(f);

@@ -121,12 +121,35 @@ mfem::Array<int> MarkedElements(double threshold, const mfem::Vector &e, bool gt
   return ind;
 }
 
-void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalance)
+// Helper function responsible for rebalancing the mesh, and optionally writing meshes from
+// the intermediate stages to disk.
+void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalance,
+                   const config::AdaptiveRefinementData &param, std::string output_dir)
 {
   auto comm = Mpi::World();
-  mesh->ExchangeFaceNbrData();
+  int width = 1 + static_cast<int>(
+                      std::log10(Mpi::Size(comm) - 1));  // For sizing parallel file names
+  if (output_dir.back() != '/')
+  {
+    output_dir += '/';
+  }
+  std::string serial_mesh_filename;
+  if (param.write_serial_mesh)
+  {
+    serial_mesh_filename += (output_dir + "serial.mesh");
+  }
+  if (param.write_pre_balance_mesh)
+  {
+    std::ofstream pfile(
+        mfem::MakeParFilename(output_dir + "prebalance.", Mpi::Rank(comm), ".mesh", width));
+    mesh->SetPrintShared(false);  // Do not mark processor boundaries in the save
+    mesh->ParPrint(pfile);
+  }
+
+  // If there is more than one processor, perform the rebalancing.
   if (Mpi::Size(comm) > 1)
   {
+    mesh->ExchangeFaceNbrData();
     int min_elem, max_elem;
     min_elem = max_elem = mesh->GetNE();
 
@@ -137,26 +160,43 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
     Mpi::Print("Min Elem per processor: {}, Max Elem per processor: {}, Ratio: {:.3e}\n",
                min_elem, max_elem, double(max_elem) / min_elem);
 
+    if (mesh->Nonconforming() && param.write_serial_mesh)
+    {
+      mfem::Array<int> serial_partition(mesh->GetNE());
+      serial_partition = 0;
+      mesh->Rebalance(serial_partition);
+      if (Mpi::Root(comm))
+      {
+        std::ofstream serial(serial_mesh_filename);
+        mesh->Mesh::Print(serial);
+      }
+    }
+
     if (ratio > maximum_imbalance)
     {
+      Mpi::Print("Ratio {:.3f} exceeds maximum allowed value {}: Performing rebalancing.\n",
+                 ratio, maximum_imbalance);
       if (mesh->Nonconforming())
       {
-        Mpi::Print("Ratio {:.3e} exceeds maximum allowed value {}: Performing rebalancing.\n", ratio,
-                   maximum_imbalance);
         mesh->Rebalance();
       }
       else
       {
         // Without access to a refinement tree, partitioning must be done on the
         // root processor and then redistributed.
-        mesh::RebalanceConformalMesh(mesh);
+        mesh::RebalanceConformalMesh(mesh, serial_mesh_filename);
+      }
+
+      if (param.write_post_balance_mesh)
+      {
+        std::ofstream pfile(mfem::MakeParFilename(output_dir + "postbalance.",
+                                                  Mpi::Rank(comm), ".mesh", width));
+        mesh->SetPrintShared(false);  // Do not mark processor boundaries in the save
+        mesh->ParPrint(pfile);
       }
     }
+    mesh->ExchangeFaceNbrData();
   }
-
-  // If the mesh is higher order, synchronize through the nodal grid function.
-  // This will in turn call the mesh exchange of face neighbor data.
-  mesh->ExchangeFaceNbrData();
 }
 
 }  // namespace
@@ -176,7 +216,7 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
       // Create a subfolder denoting the results of this adaptation.
       const auto out_dir = fs::path(IterationPostDir(iter));
 
-      const auto options =
+      constexpr auto options =
           fs::copy_options::recursive | fs::copy_options::overwrite_existing;
       const fs::path root_dir(post_dir);
       for (const auto &f : fs::directory_iterator(root_dir))
@@ -205,7 +245,8 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
 
   if (use_amr && mesh.size() > 1)
   {
-    Mpi::Warning("{}\n", "Flattening mesh sequence: AMR will start from the final mesh in the refinement sequence.");
+    Mpi::Print("{}\n", "Flattening mesh sequence: AMR will start from the final mesh in "
+                       "the refinement sequence.");
     mesh.erase(mesh.begin(), mesh.end() - 1);
     constexpr bool refine = true, fix_orientation = true;
     mesh.back()->Finalize(refine, fix_orientation);
@@ -241,15 +282,14 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
     // There are no resources for transient amr.
     // TODO: remove this once transient simulations are supported.
     ret |= dynamic_cast<const TransientSolver *>(this) != nullptr;
-
     return ret;
   };
 
   while ((iter < param.min_its || indicators.global_error_indicator > param.tolerance) &&
          !exhausted_resources())
   {
-    Mpi::Print("Adaptation iteration {}: Initial Error Indicator: {:.3e}, DOF: {}\n", ++iter,
-               indicators.global_error_indicator, indicators.ndof);
+    Mpi::Print("Adaptation iteration {}: Initial Error Indicator: {:.3e}, DOF: {}\n",
+               ++iter, indicators.global_error_indicator, indicators.ndof);
     if (indicators.ndof < param.dof_limit)
     {
       const auto threshold = utils::ComputeDorflerThreshold(
@@ -297,7 +337,7 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
                  final_elem_count);
     }
 
-    RebalanceMesh(mesh.back(), iodata.model.refinement.adaptation.maximum_imbalance);
+    RebalanceMesh(mesh.back(), param.maximum_imbalance, param, post_dir);
     indicators = Solve(mesh, timer);
 
     // Optionally save solution off.
@@ -306,8 +346,8 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
       save_postprocess(iter);
     }
   }
-  Mpi::Print("\nFinal Error Indicator: {:.3e}, DOF: {}\n", indicators.global_error_indicator,
-             indicators.ndof);
+  Mpi::Print("\nFinal Error Indicator: {:.3e}, DOF: {}\n",
+             indicators.global_error_indicator, indicators.ndof);
   return indicators;
 }
 void BaseSolver::SaveMetadata(const mfem::ParFiniteElementSpaceHierarchy &fespaces) const

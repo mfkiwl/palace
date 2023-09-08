@@ -36,6 +36,9 @@
             "SaveStep": {"type": "integer", "inclusiveMinimum": 0},
             "MaxNCLevels": {"type": "integer", "inclusiveMinimum": 0},
             "Nonconformal": {"type": "boolean"},
+            "WriteSerialMesh": {"type": "boolean"},
+            "WritePreBalanceMesh": {"type": "boolean"},
+            "WritePostBalanceMesh": {"type": "boolean"},
             "MaximumImbalance": {"type": "number", "inclusiveMinimum": 1.0}
           }
         },
