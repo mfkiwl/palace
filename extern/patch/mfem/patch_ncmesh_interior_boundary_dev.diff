@@ -12,42 +12,8 @@ index 9bbee3ee8..10d0b5fa4 100644
  Linear and nonlinear solvers
  ----------------------------
  - Updated interface to MUMPS direct solver to support multiple right-hand
-diff --git a/examples/ex3.cpp b/examples/ex3.cpp
-index d36ec62bf..19673a451 100644
---- a/examples/ex3.cpp
-+++ b/examples/ex3.cpp
-@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
-    mesh->UniformRefinement();
-    {
-       int ref_levels =
--         (int)floor(log(1000./mesh->GetNE())/log(2.)/dim);
-+         (int)floor(log(50000./mesh->GetNE())/log(2.)/dim);
-       for (int l = 0; l < ref_levels; l++)
-       {
-          mesh->UniformRefinement();
-diff --git a/examples/ex3p.cpp b/examples/ex3p.cpp
-index 285fcc8e8..f48ec91fe 100644
---- a/examples/ex3p.cpp
-+++ b/examples/ex3p.cpp
-@@ -146,15 +146,13 @@ int main(int argc, char *argv[])
-       }
-    }
- 
--
-    // 6. Define a parallel mesh by a partitioning of the serial mesh. Refine
-    //    this mesh further in parallel to increase the resolution. Once the
-    //    parallel mesh is defined, the serial mesh can be deleted.
-    ParMesh *pmesh = new ParMesh(MPI_COMM_WORLD, *mesh);
--
-    delete mesh;
-    {
--      int par_ref_levels = 1;
-+      int par_ref_levels = 2;
-       for (int l = 0; l < par_ref_levels; l++)
-       {
-          pmesh->UniformRefinement();
 diff --git a/fem/fespace.cpp b/fem/fespace.cpp
-index c898d4983..4d97a5929 100644
+index c898d4983..dc4127ac3 100644
 --- a/fem/fespace.cpp
 +++ b/fem/fespace.cpp
 @@ -492,13 +492,12 @@ void FiniteElementSpace::BuildDofToArrays()
@@ -68,7 +34,7 @@ index c898d4983..4d97a5929 100644
     }
  }
  
-@@ -506,7 +505,7 @@ void FiniteElementSpace::GetEssentialVDofs(const Array<int> &bdr_attr_is_ess,
+@@ -506,28 +505,57 @@ void FiniteElementSpace::GetEssentialVDofs(const Array<int> &bdr_attr_is_ess,
                                             Array<int> &ess_vdofs,
                                             int component) const
  {
@@ -77,7 +43,8 @@ index c898d4983..4d97a5929 100644
  
     ess_vdofs.SetSize(GetVSize());
     ess_vdofs = 0;
-@@ -515,19 +514,49 @@ void FiniteElementSpace::GetEssentialVDofs(const Array<int> &bdr_attr_is_ess,
+-
+    for (int i = 0; i < GetNBE(); i++)
     {
        if (bdr_attr_is_ess[GetBdrAttribute(i)-1])
        {
@@ -86,8 +53,7 @@ index c898d4983..4d97a5929 100644
 +         if (Nonconforming())
 +         {
 +            // Need to take care on internal non-conforming "boundaries". Boundary
-+            // elements are conforming or slave. The only exception to this
-+            // being "ghost boundary elements" which are master faces
++            // elements are conforming or slave.
 +            int f = mesh->GetBdrElementEdgeIndex(i);
 +            int inf1, inf2;
 +            mesh->GetFaceInfos(f, &inf1, &inf2, &ncface);
@@ -100,7 +66,8 @@ index c898d4983..4d97a5929 100644
 +            mesh->GetFaceInfos(face_index, &inf1, &inf2, &ncface);
 +            if (face_index >= mesh->GetNumFaces() && ncface < 0)
 +            {
-+               // Ghost master face, do not process on this rank
++               // Insufficient information to process a ghost master face. These are
++               // processed later using `GetBoundaryClosure`.
 +               continue;
 +            }
 +            else if (component < 0)
@@ -133,45 +100,71 @@ index c898d4983..4d97a5929 100644
        }
     }
  
-@@ -542,31 +571,27 @@ void FiniteElementSpace::GetEssentialVDofs(const Array<int> &bdr_attr_is_ess,
+@@ -535,38 +563,47 @@ void FiniteElementSpace::GetEssentialVDofs(const Array<int> &bdr_attr_is_ess,
+    // local DOFs affected by boundary elements on other processors
+    if (Nonconforming())
+    {
+-      Array<int> bdr_verts, bdr_edges;
+-      mesh->ncmesh->GetBoundaryClosure(bdr_attr_is_ess, bdr_verts, bdr_edges);
++      Array<int> bdr_verts, bdr_edges, bdr_faces;
++      mesh->ncmesh->GetBoundaryClosure(bdr_attr_is_ess, bdr_verts, bdr_edges, bdr_faces);
+ 
+-      for (int i = 0; i < bdr_verts.Size(); i++)
++      for (auto v : bdr_verts)
        {
           if (component < 0)
           {
 -            GetVertexVDofs(bdr_verts[i], vdofs);
 -            mark_dofs(vdofs, ess_vdofs);
-+            GetVertexVDofs(bdr_verts[i], dofs);
++            GetVertexVDofs(v, dofs);
           }
           else
           {
-             GetVertexDofs(bdr_verts[i], dofs);
+-            GetVertexDofs(bdr_verts[i], dofs);
 -            for (int d = 0; d < dofs.Size(); d++)
 -            { dofs[d] = DofToVDof(dofs[d], component); }
 -            mark_dofs(dofs, ess_vdofs);
++            GetVertexDofs(v, dofs);
 +            for (auto &d : dofs) { d = DofToVDof(d, component); }
           }
 +         MarkDofs(dofs, ess_vdofs);
        }
-       for (int i = 0; i < bdr_edges.Size(); i++)
+-      for (int i = 0; i < bdr_edges.Size(); i++)
++      for (auto e : bdr_edges)
        {
           if (component < 0)
           {
 -            GetEdgeVDofs(bdr_edges[i], vdofs);
 -            mark_dofs(vdofs, ess_vdofs);
-+            GetEdgeVDofs(bdr_edges[i], dofs);
++            GetEdgeVDofs(e, dofs);
           }
           else
           {
-             GetEdgeDofs(bdr_edges[i], dofs);
+-            GetEdgeDofs(bdr_edges[i], dofs);
 -            for (int d = 0; d < dofs.Size(); d++)
 -            { dofs[d] = DofToVDof(dofs[d], component); }
 -            mark_dofs(dofs, ess_vdofs);
++            GetEdgeDofs(e, dofs);
 +            for (auto &d : dofs) { d = DofToVDof(d, component); }
           }
++         MarkDofs(dofs, ess_vdofs);
++      }
++      for (auto f : bdr_faces)
++      {
++         if (component < 0)
++         {
++            GetFaceVDofs(f, dofs);
++         }
++         else
++         {
++            GetFaceDofs(f, dofs);
++            for (auto &d : dofs) { d = DofToVDof(d, component); }
++         }
 +         MarkDofs(dofs, ess_vdofs);
        }
     }
  }
-@@ -585,6 +610,19 @@ void FiniteElementSpace::GetEssentialTrueDofs(const Array<int> &bdr_attr_is_ess,
+@@ -585,6 +622,19 @@ void FiniteElementSpace::GetEssentialTrueDofs(const Array<int> &bdr_attr_is_ess,
     else
     {
        R->BooleanMult(ess_vdofs, ess_tdofs);
@@ -191,7 +184,7 @@ index c898d4983..4d97a5929 100644
     }
     MarkerToList(ess_tdofs, ess_tdof_list);
  }
-@@ -933,6 +971,15 @@ int FiniteElementSpace::GetEntityDofs(int entity, int index, Array<int> &dofs,
+@@ -933,6 +983,15 @@ int FiniteElementSpace::GetEntityDofs(int entity, int index, Array<int> &dofs,
     }
  }
  
@@ -246,8 +239,34 @@ index d8184eac6..5fd65083d 100644
     /** @brief For a partially conforming FE space, convert a marker array (nonzero
         entries are true) on the partially conforming dofs to a marker array on
         the conforming dofs. A conforming dofs is marked iff at least one of its
+diff --git a/fem/gridfunc.cpp b/fem/gridfunc.cpp
+index fc55af976..e0119345f 100644
+--- a/fem/gridfunc.cpp
++++ b/fem/gridfunc.cpp
+@@ -2204,8 +2204,8 @@ void GridFunction::AccumulateAndCountBdrValues(
+       Vector vals;
+       Mesh *mesh = fes->GetMesh();
+       NCMesh *ncmesh = mesh->ncmesh;
+-      Array<int> bdr_edges, bdr_vertices;
+-      ncmesh->GetBoundaryClosure(attr, bdr_vertices, bdr_edges);
++      Array<int> bdr_edges, bdr_vertices, bdr_faces;
++      ncmesh->GetBoundaryClosure(attr, bdr_vertices, bdr_edges, bdr_faces);
+ 
+       for (i = 0; i < bdr_edges.Size(); i++)
+       {
+@@ -2311,8 +2311,8 @@ void GridFunction::AccumulateAndCountBdrTangentValues(
+    {
+       Mesh *mesh = fes->GetMesh();
+       NCMesh *ncmesh = mesh->ncmesh;
+-      Array<int> bdr_edges, bdr_vertices;
+-      ncmesh->GetBoundaryClosure(bdr_attr, bdr_vertices, bdr_edges);
++      Array<int> bdr_edges, bdr_vertices, bdr_faces;
++      ncmesh->GetBoundaryClosure(bdr_attr, bdr_vertices, bdr_edges, bdr_faces);
+ 
+       for (int i = 0; i < bdr_edges.Size(); i++)
+       {
 diff --git a/fem/pfespace.cpp b/fem/pfespace.cpp
-index ef3e7437b..107b1e2d2 100644
+index ef3e7437b..6b4ba7477 100644
 --- a/fem/pfespace.cpp
 +++ b/fem/pfespace.cpp
 @@ -90,18 +90,18 @@ ParNURBSExtension *ParFiniteElementSpace::MakeLocalNURBSext(
@@ -290,46 +309,7 @@ index ef3e7437b..107b1e2d2 100644
     if (Conforming())
     {
        ApplyLDofSigns(dofs);
-@@ -1062,6 +1064,38 @@ void ParFiniteElementSpace::GetEssentialVDofs(const Array<int> &bdr_attr_is_ess,
- {
-    FiniteElementSpace::GetEssentialVDofs(bdr_attr_is_ess, ess_dofs, component);
- 
-+   if (mesh->Nonconforming())
-+   {
-+      // In a nonconforming mesh, there can be internal boundary elements that
-+      // can only be marked from ghost child faces. These are constructed during the
-+      // ExchangeFaceNbrData phase
-+
-+      Array<int> dofs;
-+      for (const auto &kv : pncmesh->GetGhostBoundaryElements())
-+      {
-+         if (bdr_attr_is_ess[kv.first - 1])
-+         {
-+            if (component < 0)
-+            {
-+               for (auto f : kv.second)
-+               {
-+                  GetEntityVDofs(mesh->Dimension() - 1, f, dofs);
-+                  MarkDofs(dofs, ess_dofs);
-+               }
-+            }
-+            else
-+            {
-+               for (auto f : kv.second)
-+               {
-+                  GetEntityDofs(mesh->Dimension() - 1, f, dofs);
-+                  for (auto &d : dofs) { d = DofToVDof(d, component); }
-+                  MarkDofs(dofs, ess_dofs);
-+               }
-+            }
-+         }
-+      }
-+   }
-+
-    // Make sure that processors without boundary elements mark
-    // their boundary dofs (if they have any).
-    Synchronize(ess_dofs);
-@@ -1080,18 +1114,28 @@ void ParFiniteElementSpace::GetEssentialTrueDofs(const Array<int>
+@@ -1080,18 +1082,28 @@ void ParFiniteElementSpace::GetEssentialTrueDofs(const Array<int>
  #ifdef MFEM_DEBUG
     // Verify that in boolean arithmetic: P^T ess_dofs = R ess_dofs.
     Array<int> true_ess_dofs2(true_ess_dofs.Size());
@@ -362,7 +342,7 @@ index ef3e7437b..107b1e2d2 100644
  #endif
  
     MarkerToList(true_ess_dofs, ess_tdof_list);
-@@ -2398,7 +2442,7 @@ int ParFiniteElementSpace
+@@ -2398,7 +2410,7 @@ int ParFiniteElementSpace
  
              if (master_dofs.Size() == 0) { continue; }
  
@@ -371,7 +351,7 @@ index ef3e7437b..107b1e2d2 100644
              if (fe == nullptr) { continue; }
  
              switch (mf.Geom())
-@@ -2547,6 +2591,8 @@ int ParFiniteElementSpace
+@@ -2547,6 +2559,8 @@ int ParFiniteElementSpace
        *dof_tdof = -1;
     }
  
@@ -380,6 +360,20 @@ index ef3e7437b..107b1e2d2 100644
     std::vector<PMatrixRow> pmatrix(total_dofs);
  
     const bool bynodes = (ordering == Ordering::byNODES);
+diff --git a/fem/pfespace.hpp b/fem/pfespace.hpp
+index 3b940f2af..7bf683049 100644
+--- a/fem/pfespace.hpp
++++ b/fem/pfespace.hpp
+@@ -123,8 +123,8 @@ private:
+    void GetGhostVertexDofs(const MeshId &id, Array<int> &dofs) const;
+    void GetGhostEdgeDofs(const MeshId &edge_id, Array<int> &dofs) const;
+    void GetGhostFaceDofs(const MeshId &face_id, Array<int> &dofs) const;
+-
+    void GetGhostDofs(int entity, const MeshId &id, Array<int> &dofs) const;
++
+    /// Return the dofs associated with the interior of the given mesh entity.
+    void GetBareDofs(int entity, int index, Array<int> &dofs) const;
+ 
 diff --git a/general/hash.hpp b/general/hash.hpp
 index 288d51288..b517172aa 100644
 --- a/general/hash.hpp
@@ -500,7 +494,7 @@ index 6b62a14d6..f8902864e 100644
  
  extern MFEM_EXPORT class TriLinear3DFiniteElement HexahedronFE;
 diff --git a/mesh/mesh.cpp b/mesh/mesh.cpp
-index 0ea2f4eb1..c7d558996 100644
+index d7e562362..691dbdd66 100644
 --- a/mesh/mesh.cpp
 +++ b/mesh/mesh.cpp
 @@ -1433,6 +1433,7 @@ Geometry::Type Mesh::GetFaceGeometry(int Face) const
@@ -742,7 +736,7 @@ index 088147d89..de50be954 100644
  
         The element indices in this structure don't need further processing,
 diff --git a/mesh/ncmesh.cpp b/mesh/ncmesh.cpp
-index 381e73f60..550e104dd 100644
+index 381e73f60..0d1115cf7 100644
 --- a/mesh/ncmesh.cpp
 +++ b/mesh/ncmesh.cpp
 @@ -2449,18 +2449,21 @@ void NCMesh::GetMeshComponents(Mesh &mesh) const
@@ -938,7 +932,19 @@ index 381e73f60..550e104dd 100644
     return true;
  }
  
-@@ -5195,9 +5217,8 @@ void NCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+@@ -5186,18 +5208,19 @@ void NCMesh::FindFaceNodes(int face, int node[4])
+ }
+ 
+ void NCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+-                                Array<int> &bdr_vertices, Array<int> &bdr_edges)
++                                Array<int> &bdr_vertices, Array<int> &bdr_edges,
++                                Array<int> &bdr_faces)
+ {
+    bdr_vertices.SetSize(0);
+    bdr_edges.SetSize(0);
++   bdr_faces.SetSize(0);
+ 
+    if (Dim == 3)
     {
        GetFaceList(); // make sure 'boundary_faces' is up to date
  
@@ -949,7 +955,7 @@ index 381e73f60..550e104dd 100644
           if (bdr_attr_is_ess[faces[face].attribute - 1])
           {
              int node[4];
-@@ -5226,9 +5247,8 @@ void NCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+@@ -5226,9 +5249,8 @@ void NCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
     {
        GetEdgeList(); // make sure 'boundary_faces' is up to date
  
@@ -960,7 +966,7 @@ index 381e73f60..550e104dd 100644
           Face &fc = faces[face];
           if (bdr_attr_is_ess[fc.attribute - 1])
           {
-@@ -5245,18 +5265,35 @@ void NCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+@@ -5245,18 +5267,35 @@ void NCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
     bdr_edges.Unique();
  }
  
@@ -1005,7 +1011,7 @@ index 381e73f60..550e104dd 100644
  
  int NCMesh::EdgeSplitLevel(int vn1, int vn2) const
  {
-@@ -5271,15 +5308,13 @@ int NCMesh::TriFaceSplitLevel(int vn1, int vn2, int vn3) const
+@@ -5271,15 +5310,13 @@ int NCMesh::TriFaceSplitLevel(int vn1, int vn2, int vn3) const
     if (TriFaceSplit(vn1, vn2, vn3, mid) &&
         faces.FindId(vn1, vn2, vn3) < 0)
     {
@@ -1027,7 +1033,7 @@ index 381e73f60..550e104dd 100644
  }
  
  void NCMesh::QuadFaceSplitLevel(int vn1, int vn2, int vn3, int vn4,
-@@ -5309,6 +5344,13 @@ void NCMesh::QuadFaceSplitLevel(int vn1, int vn2, int vn3, int vn4,
+@@ -5309,6 +5346,13 @@ void NCMesh::QuadFaceSplitLevel(int vn1, int vn2, int vn3, int vn4,
     }
  }
  
@@ -1041,7 +1047,7 @@ index 381e73f60..550e104dd 100644
  void NCMesh::CountSplits(int elem, int splits[3]) const
  {
     const Element &el = elements[elem];
-@@ -5345,57 +5387,52 @@ void NCMesh::CountSplits(int elem, int splits[3]) const
+@@ -5345,57 +5389,52 @@ void NCMesh::CountSplits(int elem, int splits[3]) const
  
     if (el.Geom() == Geometry::CUBE)
     {
@@ -1121,7 +1127,7 @@ index 381e73f60..550e104dd 100644
        splits[1] = splits[0];
     }
     else
-@@ -6368,17 +6405,17 @@ void NCMesh::DebugDump(std::ostream &os) const
+@@ -6368,17 +6407,17 @@ void NCMesh::DebugDump(std::ostream &os) const
  
     // dump faces
     os << faces.Size() << "\n";
@@ -1145,7 +1151,7 @@ index 381e73f60..550e104dd 100644
  
        const int* fv = GI[el.Geom()].faces[lf];
        const int nfv = GI[el.Geom()].nfv[lf];
-@@ -6388,7 +6425,7 @@ void NCMesh::DebugDump(std::ostream &os) const
+@@ -6388,7 +6427,7 @@ void NCMesh::DebugDump(std::ostream &os) const
        {
           os << " " << el.node[fv[i]];
        }
@@ -1155,10 +1161,27 @@ index 381e73f60..550e104dd 100644
     }
  }
 diff --git a/mesh/ncmesh.hpp b/mesh/ncmesh.hpp
-index ddd423bfa..227aa4152 100644
+index ddd423bfa..3cfe0181d 100644
 --- a/mesh/ncmesh.hpp
 +++ b/mesh/ncmesh.hpp
-@@ -412,7 +412,6 @@ protected: // non-public interface for the Mesh class
+@@ -348,11 +348,13 @@ public:
+    /** Get a list of vertices (2D/3D) and edges (3D) that coincide with boundary
+        elements with the specified attributes (marked in 'bdr_attr_is_ess').
+        In 3D this function also reveals "hidden" boundary edges. In parallel it
+-       helps identifying boundary vertices/edges affected by non-local boundary
+-       elements. */
++       helps identifying boundary vertices/edges/faces affected by non-local boundary
++       elements. Hidden faces can occur for an internal boundary coincident to a processor
++       boundary.
++       */
+    virtual void GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+                                    Array<int> &bdr_vertices,
+-                                   Array<int> &bdr_edges);
++                                   Array<int> &bdr_edges, Array<int> &bdr_faces);
+ 
+    /// Return element geometry type. @a index is the Mesh element number.
+    Geometry::Type GetElementGeometry(int index) const
+@@ -412,7 +414,6 @@ protected: // non-public interface for the Mesh class
         by calling Mesh::SetCurvature or otherwise setting the Nodes. */
     void MakeTopologyOnly() { coordinates.DeleteAll(); }
  
@@ -1166,7 +1189,7 @@ index ddd423bfa..227aa4152 100644
  protected: // implementation
  
     int Dim, spaceDim; ///< dimensions of the elements and the vertex coordinates
-@@ -550,7 +549,6 @@ protected: // implementation
+@@ -550,7 +551,6 @@ protected: // implementation
  
     Table element_vertex; ///< leaf-element to vertex table, see FindSetNeighbors
  
@@ -1174,7 +1197,7 @@ index ddd423bfa..227aa4152 100644
     /// Update the leaf elements indices in leaf_elements
     void UpdateLeafElements();
  
-@@ -668,10 +666,79 @@ protected: // implementation
+@@ -668,10 +668,79 @@ protected: // implementation
  
     mfem::Element* NewMeshElement(int geom) const;
  
@@ -1256,7 +1279,7 @@ index ddd423bfa..227aa4152 100644
  
     void ForceRefinement(int vn1, int vn2, int vn3, int vn4);
  
-@@ -932,9 +999,7 @@ protected: // implementation
+@@ -932,9 +1001,7 @@ protected: // implementation
     void InitDerefTransforms();
     void SetDerefMatrixCodes(int parent, Array<int> &fine_coarse);
  
@@ -1266,7 +1289,7 @@ index ddd423bfa..227aa4152 100644
     struct TmpVertex
     {
        bool valid, visited;
-@@ -953,10 +1018,56 @@ protected: // implementation
+@@ -953,10 +1020,56 @@ protected: // implementation
  
     void FindFaceNodes(int face, int node[4]);
  
@@ -1323,7 +1346,7 @@ index ddd423bfa..227aa4152 100644
  
     void CountSplits(int elem, int splits[3]) const;
     void GetLimitRefinements(Array<Refinement> &refinements, int max_level);
-@@ -993,7 +1104,6 @@ protected: // implementation
+@@ -993,7 +1106,6 @@ protected: // implementation
     /// Load the deprecated MFEM mesh v1.1 format for backward compatibility.
     void LoadLegacyFormat(std::istream &input, int &curved, int &is_nc);
  
@@ -1332,7 +1355,7 @@ index ddd423bfa..227aa4152 100644
  
     /// This holds in one place the constants about the geometries we support
 diff --git a/mesh/pmesh.cpp b/mesh/pmesh.cpp
-index 76a67e720..fcf46ef4a 100644
+index c9c9ad104..428aa0b3e 100644
 --- a/mesh/pmesh.cpp
 +++ b/mesh/pmesh.cpp
 @@ -351,11 +351,8 @@ int ParMesh::BuildLocalVertices(const mfem::Mesh &mesh,
@@ -1366,7 +1389,7 @@ index 76a67e720..fcf46ef4a 100644
     if (mesh.NURBSext)
     {
        activeBdrElem.SetSize(mesh.GetNBE());
-@@ -2079,10 +2075,15 @@ void ParMesh::ExchangeFaceNbrData()
+@@ -2079,7 +2075,7 @@ void ParMesh::ExchangeFaceNbrData()
  
     if (Nonconforming())
     {
@@ -1375,32 +1398,11 @@ index 76a67e720..fcf46ef4a 100644
        pncmesh->GetFaceNeighbors(*this);
        have_face_nbr_data = true;
  
-+      // Internal boundary elements with an NC mesh requires extra "ghost
-+      // boundary element" information for enforcing essential boundaries.
-+      pncmesh->ComputeGhostBoundaryElements(*this);
-+
-+      ExchangeFaceNbrNodes();
-       return;
-    }
- 
-diff --git a/mesh/pmesh.hpp b/mesh/pmesh.hpp
-index c9d42aa73..ce0846c09 100644
---- a/mesh/pmesh.hpp
-+++ b/mesh/pmesh.hpp
-@@ -595,8 +595,6 @@ public:
-    /// Return the local face index for the given shared face.
-    int GetSharedFace(int sface) const;
- 
--
--
-    /** @brief Returns the number of local faces according to the requested type,
-        does not count master non-conforming faces.
- 
 diff --git a/mesh/pncmesh.cpp b/mesh/pncmesh.cpp
-index 300595296..404220df1 100644
+index 3cf2a3a47..e398b0c96 100644
 --- a/mesh/pncmesh.cpp
 +++ b/mesh/pncmesh.cpp
-@@ -577,17 +577,17 @@ void ParNCMesh::CalcFaceOrientations()
+@@ -577,41 +577,61 @@ void ParNCMesh::CalcFaceOrientations()
     face_orient.SetSize(NFaces);
     face_orient = 0;
  
@@ -1423,9 +1425,14 @@ index 300595296..404220df1 100644
        }
     }
  }
-@@ -598,16 +598,16 @@ void ParNCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+ 
+ void ParNCMesh::GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+                                    Array<int> &bdr_vertices,
+-                                   Array<int> &bdr_edges)
++                                   Array<int> &bdr_edges, Array<int> &bdr_faces)
  {
-    NCMesh::GetBoundaryClosure(bdr_attr_is_ess, bdr_vertices, bdr_edges);
+-   NCMesh::GetBoundaryClosure(bdr_attr_is_ess, bdr_vertices, bdr_edges);
++   NCMesh::GetBoundaryClosure(bdr_attr_is_ess, bdr_vertices, bdr_edges, bdr_faces);
  
 -   int i, j;
     // filter out ghost vertices
@@ -1443,16 +1450,31 @@ index 300595296..404220df1 100644
     {
        if (bdr_edges[i] < NEdges) { bdr_edges[j++] = bdr_edges[i]; }
     }
-@@ -910,7 +910,7 @@ void ParNCMesh::GetFaceNeighbors(ParMesh &pmesh)
-    bool face_nbr_w_tri_faces = false;
+    bdr_edges.SetSize(j);
++
++   // Mark masters of slave boundary faces as
++   for (const auto &mf : shared_faces.masters)
++   {
++      if (elements[mf.element].rank != MyRank) { continue; }
++      for (int j = mf.slaves_begin; j < mf.slaves_end; j++)
++      {
++         const auto &sf = face_list.slaves[j];
++         if (sf.index < 0)
++         {
++            // Face-edge constraint. Skip this edge.
++            continue;
++         }
++         Face* face = GetFace(elements[sf.element], sf.local);
++         if (face && face->Boundary() && bdr_attr_is_ess[face->attribute - 1])
++         {
++            bdr_faces.Append(mf.index);
++         }
++      }
++   }
+ }
  
-    // go over all shared faces and collect face neighbor elements
--   for (int i = 0; i < shared.conforming.Size(); ++i)
-+   for (int i = 0; i < shared.conforming.Size(); i++)
-    {
-       const MeshId &cf = shared.conforming[i];
-       Face* face = GetFace(elements[cf.element], cf.local);
-@@ -1308,12 +1308,63 @@ void ParNCMesh::GetFaceNeighbors(ParMesh &pmesh)
+ 
+@@ -1308,8 +1328,6 @@ void ParNCMesh::GetFaceNeighbors(ParMesh &pmesh)
           MPI_Waitall(int(send_requests.size()), send_requests.data(), status.data());
        }
     }
@@ -1461,64 +1483,15 @@ index 300595296..404220df1 100644
     // NOTE: this function skips ParMesh::send_face_nbr_vertices and
     // ParMesh::face_nbr_vertices_offset, these are not used outside of ParMesh
  }
+@@ -1323,7 +1341,6 @@ void ParNCMesh::ClearAuxPM()
+    aux_pm_store.DeleteAll();
+ }
  
-+void ParNCMesh::ComputeGhostBoundaryElements(const ParMesh &mesh)
-+{
-+   // 1D cannot have ghost boundary elements
-+   if (Dim == 1) { return; }
-+
-+   // ParNCMesh requires additional treatment of "ghost boundary elements" in
-+   // the scenario where a parent face has only ghost children. A local mesh
-+   // will fail to identify essential boundary conditions without the use of
-+   // these ghost boundary elements, as they will not be added into the list of
-+   // local boundary elements, whose masters will eventually be found.
-+
-+   ghost_boundary_elements.clear();
-+   for (int n = NElements; n < NGhostElements + NElements; ++n)
-+   {
-+      const auto &nc_elem = elements[leaf_elements[n]];
-+
-+      const int * const node = nc_elem.node;
-+      GeomInfo& gi = GI[(int) nc_elem.geom];
-+
-+      // Loop over faces and find those that are masters of internal boundaries
-+      for (int k = 0; k < gi.nf; ++k)
-+      {
-+         const int * const fv = gi.faces[k];
-+         const auto id = faces.FindId(node[fv[0]], node[fv[1]], node[fv[2]],
-+                                      node[fv[3]]);
-+
-+         if (id >= 0 && faces[id].Boundary() && faces[id].index >= NFaces)
-+         {
-+            // Found a ghost face, and it is a boundary element.
-+            // Need to check if it's a slave, and if it's internal.
-+            const auto &face = faces[id];
-+
-+            // A conformal face
-+            if (face.elem[0] >= 0 && face.elem[1] >= 0) { continue; }
-+
-+            // A ghost face not indexed by the mesh -> no useful information
-+            if (face.index >= mesh.faces_info.Size()) { continue; }
-+
-+            MFEM_ASSERT(face.index >= 0, face.index);
-+            const auto &finfo = mesh.faces_info[face.index];
-+            if (mesh.IsSlaveFace(finfo)) // slave face
-+            {
-+               int master_face = mesh.GetNCMasterFaceIndex(finfo.NCFace);
-+               if (master_face < mesh.GetNFaces())
-+               {
-+                  ghost_boundary_elements[face.attribute].insert(master_face);
-+               }
-+            }
-+         }
-+      }
-+   }
-+}
-+
- void ParNCMesh::ClearAuxPM()
- {
-    for (int i = 0; i < aux_pm_store.Size(); i++)
-@@ -1954,10 +2005,9 @@ void ParNCMesh::RedistributeElements(Array<int> &new_ranks, int target_elements,
+-
+ //// Prune, Refine, Derefine ///////////////////////////////////////////////////
+ 
+ bool ParNCMesh::PruneTree(int elem)
+@@ -1954,10 +1971,9 @@ void ParNCMesh::RedistributeElements(Array<int> &new_ranks, int target_elements,
     NeighborElementRankMessage::RecvAll(recv_ghost_ranks, MyComm);
  
     // read new ranks for the ghost layer from messages received
@@ -1531,7 +1504,7 @@ index 300595296..404220df1 100644
        for (int i = 0; i < msg.Size(); i++)
        {
           int ghost_index = elements[msg.elements[i]].index;
-@@ -2484,9 +2534,8 @@ void ParNCMesh::AdjustMeshIds(Array<MeshId> ids[], int rank)
+@@ -2484,9 +2500,8 @@ void ParNCMesh::AdjustMeshIds(Array<MeshId> ids[], int rank)
  
     // find vertices/edges of master faces shared with 'rank', and modify their
     // MeshIds so their element/local matches the element of the master face
@@ -1543,76 +1516,32 @@ index 300595296..404220df1 100644
        {
           int v[4], e[4], eo[4], pos, k;
 diff --git a/mesh/pncmesh.hpp b/mesh/pncmesh.hpp
-index df5fb929e..9c425b631 100644
+index df5fb929e..d33f5cbbe 100644
 --- a/mesh/pncmesh.hpp
 +++ b/mesh/pncmesh.hpp
-@@ -246,6 +246,17 @@ public:
-        The debug mesh will have element attributes set to element rank + 1. */
-    void GetDebugMesh(Mesh &debug_mesh) const;
+@@ -229,10 +229,11 @@ public:
+                                     const Table &deref_table);
  
-+   /**
-+    * @brief Get the Ghost Boundary Elements object, explicitly behind a const
-+    * interface to avoid external modification. See ComputeGhostBoundaryElements
-+    * for information on ghost boundary elements and their importance.
-+    *
-+    * @return std::map<int, std::set<int>> Container from boundary attribute
-+    * value to set of codimension 1 objects that are parents of ghost
-+    * children with this attribute.
-+    */
-+   std::map<int, std::set<int>> GetGhostBoundaryElements() const { return ghost_boundary_elements; }
-+
- protected: // interface for ParMesh
+    /** Extension of NCMesh::GetBoundaryClosure. Filters out ghost vertices and
+-       ghost edges from 'bdr_vertices' and 'bdr_edges'. */
++       ghost edges from 'bdr_vertices' and 'bdr_edges', and uncovers hidden internal
++       boundary faces. */
+    void GetBoundaryClosure(const Array<int> &bdr_attr_is_ess,
+                            Array<int> &bdr_vertices,
+-                           Array<int> &bdr_edges) override;
++                           Array<int> &bdr_edges, Array<int> &bdr_faces) override;
  
-    friend class ParMesh;
-@@ -259,6 +270,34 @@ protected: // interface for ParMesh
+    /// Save memory by releasing all non-essential and cached data.
+    void Trim() override;
+@@ -258,8 +259,6 @@ protected: // interface for ParMesh
+    /** Populate face neighbor members of ParMesh from the ghost layer, without
         communication. */
     void GetFaceNeighbors(class ParMesh &pmesh);
- 
-+   /**
-+    * @brief Given a ParMesh with all FaceNbrData computed, populate the
-+    * ghost_boundary_elements.
-+    * @details The ghost_boundary_elements container is accessed via
-+    * GetGhostBoundaryElements, and represents a collection of parent faces that
-+    * are coincident to a given boundary element, but whose child faces are all
-+    * ghosts. Boundary elements must be child faces or conformal faces, in
-+    * order to calculate functionals and boundary condition integrals. However,
-+    * essential boundary conditions, must be imposed via the parent faces, in
-+    * order to correctly constrain all face internal DOFs. This is accomplished
-+    * by traversing from child faces to parent faces, but these dofs cannot be
-+    * constrained if the parent face is a ghost.
-+    *
-+    * The corollary to this is that a parent face with only ghost children, will
-+    * never be marked as part of an internal boundary during the usual boundary
-+    * element traversal. Consequently, the ghost boundary elements keep track of
-+    * these ghost boundary elements, by collecting them once the face neighbor
-+    * data has been exchanged. A ParFiniteElementSpace is then able to loop over
-+    * these DOF additionally during GetEssentialVDofs.
-+    *
-+    * NOTE: Users do not need to call this method, it will be called during
-+    * ExchangeFaceNbrData once the relevant predicate information has been
-+    * established.
-+    *
-+    * @param mesh The mesh for whom the ghost boundary elements should be
-+    * established.
-+    */
-+   void ComputeGhostBoundaryElements(const ParMesh &mesh);
- 
+-
+-
  protected: // implementation
  
-@@ -297,6 +336,13 @@ protected: // implementation
-    Array<int> ghost_layer;    ///< list of elements whose 'element_type' == 2.
-    Array<int> boundary_layer; ///< list of type 3 elements
- 
-+   /// Master face internal boundary elements that are attached to the processor
-+   /// boundary which cannot be found by looping over the boundary elements alone.
-+   /// This variable maps from boundary attributes, to a collection of boundary
-+   /// faces (i.e. codimension 1 objects) that are parents of ghost child faces
-+   /// with this attribute.
-+   std::map<int, std::set<int>> ghost_boundary_elements;
-+
-    void Update() override;
- 
-    /// Return the processor number for a global element number.
+    MPI_Comm MyComm;
 diff --git a/mesh/point.cpp b/mesh/point.cpp
 index 93df9f9f4..0e97a1756 100644
 --- a/mesh/point.cpp
@@ -1634,10 +1563,10 @@ index 93df9f9f4..0e97a1756 100644
 +
  }
 diff --git a/mesh/point.hpp b/mesh/point.hpp
-index db14bfb77..70b4b51ad 100644
+index db14bfb77..97e4ee94c 100644
 --- a/mesh/point.hpp
 +++ b/mesh/point.hpp
-@@ -33,29 +33,36 @@ public:
+@@ -33,29 +33,33 @@ public:
     Point(const int *ind, int attr = 1);
  
     /// Return element's type.
@@ -1655,29 +1584,27 @@ index db14bfb77..70b4b51ad 100644
  
 -   virtual int GetNVertices() const { return 1; }
 +   /// @note The returned array should NOT be deleted by the caller.
-+   int *GetVertices () override { return indices; }
++   int * GetVertices () override { return indices; }
  
 -   virtual int GetNEdges() const { return 0; }
 +   /// Set the vertices according to the given input.
 +   void SetVertices(const int *ind) override;
  
 -   virtual const int *GetEdgeVertices(int ei) const { return NULL; }
-+   int GetNVertices() const override { return 1; }
- 
--   virtual int GetNFaces() const { return 0; }
-+   int GetNEdges() const override { return 0; }
- 
--   virtual int GetNFaceVertices(int) const { return 0; }
 +   const int *GetEdgeVertices(int ei) const override { return NULL; }
  
--   virtual const int *GetFaceVertices(int fi) const { return NULL; }
+-   virtual int GetNFaces() const { return 0; }
++   int GetNVertices() const override { return 1; }
++   int GetNEdges() const override { return 0; }
 +   int GetNFaces() const override { return 0; }
- 
--   virtual Element *Duplicate(Mesh *m) const
 +   int GetNFaceVertices(int) const override { return 0; }
-+
+ 
+-   virtual int GetNFaceVertices(int) const { return 0; }
 +   const int *GetFaceVertices(int fi) const override { return NULL; }
-+
+ 
+-   virtual const int *GetFaceVertices(int fi) const { return NULL; }
+-
+-   virtual Element *Duplicate(Mesh *m) const
 +   Element *Duplicate(Mesh *m) const override
     { return new Point (indices, attribute); }
  
@@ -1709,7 +1636,7 @@ index 038a3c378..fed726f13 100644
  
  }
 diff --git a/mesh/pyramid.hpp b/mesh/pyramid.hpp
-index 1a8af4ed3..abf2fee12 100644
+index 1a8af4ed3..cb36fab25 100644
 --- a/mesh/pyramid.hpp
 +++ b/mesh/pyramid.hpp
 @@ -37,35 +37,39 @@ public:
@@ -1750,8 +1677,9 @@ index 1a8af4ed3..abf2fee12 100644
 +   int GetNFaces() const override { return 5; }
  
 -   virtual int GetNFaceVertices(int fi) const
+-   { return (fi < 1) ? 4 : 3; }
 +   int GetNFaceVertices(int fi) const override
-    { return (fi < 1) ? 4 : 3; }
++   { return ( fi < 1 ) ? 4 : 3; }
  
 -   virtual const int *GetFaceVertices(int fi) const
 +   const int *GetFaceVertices(int fi) const override
@@ -2063,7 +1991,7 @@ index 6eb8c7e59..ce5a7325e 100644
  
  // @cond DOXYGEN_SKIP
 diff --git a/mesh/triangle.hpp b/mesh/triangle.hpp
-index 919b491f9..c283e218d 100644
+index 919b491f9..5816a3dcb 100644
 --- a/mesh/triangle.hpp
 +++ b/mesh/triangle.hpp
 @@ -38,13 +38,10 @@ public:
@@ -2082,7 +2010,7 @@ index 919b491f9..c283e218d 100644
  
     /** Reorder the vertices so that the longest edge is from vertex 0
         to vertex 1. If called it should be once from the mesh constructor,
-@@ -58,38 +55,46 @@ public:
+@@ -58,38 +55,47 @@ public:
     static void MarkEdge(int *indices, const DSTable &v_to_v,
                          const Array<T1> &length, const Array<T2> &length2);
  
@@ -2106,13 +2034,14 @@ index 919b491f9..c283e218d 100644
 +
 +   /// Set the indices defining the vertices
 +   void SetVertices(const Array<int> &v) override;
- 
--   virtual int *GetVertices() { return indices; }
++
 +   /// @note The returned array should NOT be deleted by the caller.
 +   int * GetVertices () override { return indices; }
 +
 +   /// Set the vertices according to the given input.
 +   void SetVertices(const int *ind) override;
+ 
+-   virtual int *GetVertices() { return indices; }
  
 -   virtual int GetNVertices() const { return 3; }
 +   int GetNVertices() const override { return 3; }
@@ -2534,7 +2463,7 @@ index 000000000..e4088a788
 +#endif // MFEM_MESH_TEST_UTILS
 \ No newline at end of file
 diff --git a/tests/unit/mesh/test_ncmesh.cpp b/tests/unit/mesh/test_ncmesh.cpp
-index 1c512fcd4..88b428d0b 100644
+index 1c512fcd4..355195b8a 100644
 --- a/tests/unit/mesh/test_ncmesh.cpp
 +++ b/tests/unit/mesh/test_ncmesh.cpp
 @@ -10,6 +10,7 @@
@@ -2545,7 +2474,30 @@ index 1c512fcd4..88b428d0b 100644
  #include "unit_tests.hpp"
  
  namespace mfem
-@@ -113,7 +114,6 @@ TEST_CASE("NCMesh PA diagonal", "[NCMesh]")
+@@ -17,6 +18,22 @@ namespace mfem
+ 
+ constexpr double EPS = 1e-10;
+ 
++// Helper to count H1 essential dofs for a given order with a given attribute
++int CountEssentialDof(Mesh &mesh, int order, int attribute)
++{
++   constexpr int dim = 3;
++   H1_FECollection fec(order, dim);
++   FiniteElementSpace fes(&mesh, &fec);
++
++   Array<int> bdr_attr_is_ess(mesh.bdr_attributes.Max());
++   bdr_attr_is_ess = 0;
++   bdr_attr_is_ess[mesh.bdr_attributes.Find(attribute)] = 1;
++
++   Array<int> ess_tdof_list;
++   fes.GetEssentialTrueDofs(bdr_attr_is_ess, ess_tdof_list);
++   return ess_tdof_list.Size();
++};
++
+ // Test case: Verify that a conforming mesh yields the same norm for the
+ //            assembled diagonal with PA when using the standard (conforming)
+ //            Mesh vs. the corresponding (non-conforming) NCMesh.
+@@ -113,7 +130,6 @@ TEST_CASE("NCMesh PA diagonal", "[NCMesh]")
  
  } // test case
  
@@ -2553,7 +2505,7 @@ index 1c512fcd4..88b428d0b 100644
  TEST_CASE("NCMesh 3D Refined Volume", "[NCMesh]")
  {
     auto mesh_fname = GENERATE("../../data/ref-tetrahedron.mesh",
-@@ -145,7 +145,6 @@ TEST_CASE("NCMesh 3D Refined Volume", "[NCMesh]")
+@@ -145,7 +161,6 @@ TEST_CASE("NCMesh 3D Refined Volume", "[NCMesh]")
     REQUIRE(summed_volume == MFEM_Approx(original_volume));
  } // test case
  
@@ -2561,13 +2513,168 @@ index 1c512fcd4..88b428d0b 100644
  TEST_CASE("NCMesh 3D Derefined Volume", "[NCMesh]")
  {
     auto mesh_fname = GENERATE("../../data/ref-tetrahedron.mesh",
-@@ -903,6 +902,1157 @@ TEST_CASE("GetVectorValueInFaceNeighborElement", "[Parallel], [NCMesh]")
+@@ -175,6 +190,55 @@ TEST_CASE("NCMesh 3D Derefined Volume", "[NCMesh]")
+    REQUIRE(derefined_volume == MFEM_Approx(original_volume));
+ } // test case
+ 
++Mesh StarMesh()
++{
++   const int nnode = 4 + 4;
++   const int nelem = 5;
++
++   Mesh mesh(3, nnode, nelem);
++
++   // central tet
++   mesh.AddVertex(0.0, 0.0, 0.0);
++   mesh.AddVertex(1.0, 0.0, 0.0);
++   mesh.AddVertex(0.0, 1.0, 0.0);
++   mesh.AddVertex(0.0, 0.0, 1.0);
++
++   mesh.AddVertex( 1.0,  1.0,  1.0); // opposite 0
++   mesh.AddVertex(-1.0,  0.0,  0.0); // opposite 1
++   mesh.AddVertex( 0.0, -1.0,  0.0); // opposite 2
++   mesh.AddVertex( 0.0,  0.0, -1.0); // opposite 3
++
++   mesh.AddTet(0, 1, 2, 3, 1); // central
++   mesh.AddTet(4, 1, 2, 3, 2); // opposite 0
++   mesh.AddTet(0, 5, 2, 3, 3); // opposite 1
++   mesh.AddTet(0, 1, 6, 3, 4); // opposite 2
++   mesh.AddTet(0, 1, 2, 7, 5); // opposite 3
++
++   mesh.FinalizeTopology();
++   mesh.Finalize(true, true);
++
++   // Introduce internal boundary elements
++   const int new_attribute = mesh.bdr_attributes.Max() + 1;
++   Array<int> original_boundary_vertices;
++   for (int f = 0; f < mesh.GetNumFaces(); ++f)
++   {
++      int e1, e2;
++      mesh.GetFaceElements(f, &e1, &e2);
++      if (e1 >= 0 && e2 >= 0 && mesh.GetAttribute(e1) != mesh.GetAttribute(e2))
++      {
++         // This is the internal face between attributes.
++         auto *new_elem = mesh.GetFace(f)->Duplicate(&mesh);
++         new_elem->SetAttribute(new_attribute);
++         new_elem->GetVertices(original_boundary_vertices);
++         mesh.AddBdrElement(new_elem);
++      }
++   }
++   mesh.SetAttributes();
++   mesh.FinalizeTopology();
++   mesh.Finalize(true, true);
++
++   return mesh;
++}
+ 
+ #ifdef MFEM_USE_MPI
+ 
+@@ -903,6 +967,1556 @@ TEST_CASE("GetVectorValueInFaceNeighborElement", "[Parallel], [NCMesh]")
     }
  }
  
+-#endif // MFEM_USE_MPI
++TEST_CASE("TetCornerRefines", "[Parallel], [NCMesh]")
++{
++   auto p = GENERATE(1,2,3);
++   CAPTURE(p);
++
++   auto smesh = Mesh("../../data/ref-tetrahedron.mesh");
++
++   REQUIRE(smesh.GetNBE() == 4);
++
++   Array<Refinement> refs;
++   refs.Append(Refinement(0, Refinement::X));
++   smesh.GeneralRefinement(refs);
++
++   // Now have a pair of elements, make the second element a different
++   // attribute.
++   smesh.SetAttribute(0, 1);
++   smesh.SetAttribute(1, 2);
++
++   REQUIRE(smesh.GetNBE() == 2 * 3);
++
++   smesh.FinalizeTopology();
++   smesh.Finalize();
++
++   // Introduce an internal boundary element
++   const int new_attribute = smesh.bdr_attributes.Max() + 1;
++   for (int f = 0; f < smesh.GetNumFaces(); ++f)
++   {
++      int e1, e2;
++      smesh.GetFaceElements(f, &e1, &e2);
++      if (e1 >= 0 && e2 >= 0 && smesh.GetAttribute(e1) != smesh.GetAttribute(e2))
++      {
++         // This is the internal face between attributes.
++         auto *new_elem = smesh.GetFace(f)->Duplicate(&smesh);
++         new_elem->SetAttribute(new_attribute);
++         smesh.AddBdrElement(new_elem);
++         break;
++      }
++   }
++   smesh.FinalizeTopology(); // Finalize to build relevant tables
++   smesh.Finalize();
++
++   // Exactly one boundary element must be added
++   REQUIRE(smesh.GetNBE() == 2 * 3 + 1);
++
++   smesh.EnsureNCMesh(true);
++
++   auto pmesh = CheckParMeshNBE(smesh);
++
++   pmesh->FinalizeTopology();
++   pmesh->Finalize();
++   pmesh->ExchangeFaceNbrData();
++
++   REQUIRE(pmesh->Nonconforming());
++
++   std::map<int, int> local_to_shared;
++   for (int i = 0; i < pmesh->GetNSharedFaces(); ++i)
++   {
++      local_to_shared[pmesh->GetSharedFace(i)] = i;
++   }
++
++   // Count the number of internal faces via the boundary elements
++   int num_internal = 0;
++   for (int n = 0; n < pmesh->GetNBE(); ++n)
++   {
++      int f, o;
++      pmesh->GetBdrElementFace(n, &f, &o);
++      if (CheckFaceInternal(*pmesh, f, local_to_shared))
++      {
++         ++num_internal;
++      }
++   }
++
++   MPI_Allreduce(MPI_IN_PLACE, &num_internal, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
++   CHECK(num_internal == 1);
++
++   CheckPoisson(*pmesh, p, pmesh->bdr_attributes.Max());
++   CheckPoisson(*pmesh, p);
++}
++
++int CountEssentialDof(ParMesh &mesh, int order, int attribute)
++{
++   constexpr int dim = 3;
++   H1_FECollection fec(order, dim);
++   ParFiniteElementSpace pfes(&mesh, &fec);
++
++   Array<int> bdr_attr_is_ess(mesh.bdr_attributes.Max());
++   bdr_attr_is_ess = 0;
++   bdr_attr_is_ess[mesh.bdr_attributes.Find(attribute)] = 1;
++
++   Array<int> ess_tdof_list;
++   pfes.GetEssentialTrueDofs(bdr_attr_is_ess, ess_tdof_list);
++
++   int num_essential_dof = ess_tdof_list.Size();
++   return num_essential_dof;
++};
++
 +TEST_CASE("InteriorBoundaryReferenceTets", "[Parallel], [NCMesh]")
 +{
-+   auto p = GENERATE(1);
++   constexpr auto seed = 314159;
++   srand(seed);
++   auto p = GENERATE(1,2,3);
 +   CAPTURE(p);
 +
 +   auto smesh = Mesh("../../data/ref-tetrahedron.mesh");
@@ -2643,82 +2750,126 @@ index 1c512fcd4..88b428d0b 100644
 +   CheckPoisson(*pmesh, p, pmesh->bdr_attributes.Max());
 +   CheckPoisson(*pmesh, p);
 +
-+   for (int refined_elem : {0, 1})
++   // auto CountEssentialDof = [&](ParMesh &pmesh, int order)
++   // {
++   //    constexpr int dim = 3;
++   //    H1_FECollection fec(order, dim);
++   //    ParFiniteElementSpace pfes(&pmesh, &fec);
++
++   //    Array<int> bdr_attr_is_ess(pmesh.bdr_attributes.Max());
++   //    bdr_attr_is_ess = 0;
++   //    bdr_attr_is_ess[pmesh.bdr_attributes.Find(new_attribute)] = 1;
++
++   //    Array<int> ess_tdof_list;
++   //    pfes.GetEssentialTrueDofs(bdr_attr_is_ess, ess_tdof_list);
++   //    return ess_tdof_list.Size();
++   // };
++
++   int num_initial_ess_tdof = CountEssentialDof(*pmesh, p, smesh.bdr_attributes.Max());
++   if (Mpi::Root())
 +   {
-+      // Now NC refine one of the attached elements, this should result in 4
-+      // internal boundary elements.
-+      Array<int> el_to_refine;
-+      el_to_refine.Append(refined_elem);
-+
-+      Mesh modified_smesh(smesh);
-+      modified_smesh.GeneralRefinement(el_to_refine);
-+
-+      // There should now be four internal boundary elements, where there was one
-+      // before.
-+      CHECK(modified_smesh.GetNBE() == 3 /* external boundaries of unrefined  */
-+            + 4 /* internal boundaries */
-+            + (3 * 4) /* external boundaries of refined */);
-+
-+      // Force the partition to have the edge case of a parent and child being
-+      // divided across the processor boundary. This necessitates the
-+      // GhostBoundaryElement treatment.
-+      auto partition = std::unique_ptr<int[]>(new int[modified_smesh.GetNE()]);
-+      srand(314159);
-+      for (int i = 0; i < modified_smesh.GetNE(); ++i)
-+      {
-+         // Randomly assign to any processor but zero.
-+         partition[i] = Mpi::WorldSize() > 1 ? 1 + rand() % (Mpi::WorldSize() - 1) : 0;
-+      }
-+      if (Mpi::WorldSize() > 0)
-+      {
-+         // Make sure on rank 1 there is a parent face with only ghost child
-+         // faces. This can cause issues with higher order dofs being uncontrolled.
-+         partition[refined_elem == 0 ? modified_smesh.GetNE() - 1 : 0] = 0;
-+      }
-+
-+      pmesh = CheckParMeshNBE(modified_smesh, partition);
-+      pmesh->Finalize();
-+      pmesh->FinalizeTopology();
-+      pmesh->ExchangeFaceNbrData();
-+
-+      auto check_faces = [&]()
-+      {
-+         // repopulate the local to shared map.
-+         local_to_shared.clear();
-+         for (int i = 0; i < pmesh->GetNSharedFaces(); ++i)
-+         {
-+            local_to_shared[pmesh->GetSharedFace(i)] = i;
-+         }
-+
-+         // Count the number of internal faces via the boundary elements
-+         num_internal = 0;
-+         for (int n = 0; n < pmesh->GetNBE(); ++n)
-+         {
-+            int f, o;
-+            pmesh->GetBdrElementFace(n, &f, &o);
-+            if (CheckFaceInternal(*pmesh, f, local_to_shared))
-+            {
-+               ++num_internal;
-+            }
-+         }
-+         MPI_Allreduce(MPI_IN_PLACE, &num_internal, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-+         CHECK(num_internal == 4);
-+
-+         CAPTURE(refined_elem);
-+         CheckPoisson(*pmesh, p, smesh.bdr_attributes.Max());
-+         CheckPoisson(*pmesh, p);
-+      };
-+
-+      check_faces();
-+      pmesh->Rebalance();
-+      pmesh->ExchangeFaceNbrData();
-+      check_faces();
++      REQUIRE(num_initial_ess_tdof > 0);
 +   }
++   // Level of refinement difference across the processor boundary from root zero to the
++   // others
++   auto ref_level = GENERATE(1,2,3);
++   auto refined_attribute = GENERATE(1,2);
++   CAPTURE(ref_level);
++   CAPTURE(refined_attribute);
++
++   Mesh modified_smesh(smesh);
++   for (int r = 0; r < ref_level; r++)
++   {
++      Array<int> el_to_refine;
++      for (int n = 0; n < modified_smesh.GetNE(); n++)
++      {
++         if (modified_smesh.GetAttribute(n) == refined_attribute)
++         {
++            el_to_refine.Append(n);
++         }
++      }
++      modified_smesh.GeneralRefinement(el_to_refine);
++   }
++
++   // There should now be some internal boundary elements, where there was one
++   // before.
++   CHECK(modified_smesh.GetNBE() == 3 /* external boundaries of unrefined  */
++         + std::pow(4, ref_level) /* internal boundaries */
++         + (3 * std::pow(4, ref_level)) /* external boundaries of refined */);
++
++   // Force the partition to have the edge case of a parent and child being
++   // divided across the processor boundary. This necessitates the
++   // GhostBoundaryElement treatment.
++   auto partition = std::unique_ptr<int[]>(new int[modified_smesh.GetNE()]);
++   for (int i = 0; i < modified_smesh.GetNE(); i++)
++   {
++      // Randomly assign to any processor but zero.
++      partition[i] = Mpi::WorldSize() > 1 ? 1 + rand() % (Mpi::WorldSize() - 1) : 0;
++   }
++   if (Mpi::WorldSize() > 0)
++   {
++      // Make sure rank 0 has the non-refined attribute. This ensures it will have
++      // a parent face with only ghost children.
++      const int unrefined_attribute = refined_attribute == 1 ? 2 : 1;
++      Array<int> root_element;
++      for (int n = 0; n < modified_smesh.GetNE(); n++)
++      {
++         if (modified_smesh.GetAttribute(n) == unrefined_attribute)
++         {
++            root_element.Append(n);
++         }
++      }
++      REQUIRE(root_element.Size() == 1);
++      partition[root_element[0]] = 0;
++   }
++
++   pmesh = CheckParMeshNBE(modified_smesh, partition);
++   pmesh->Finalize();
++   pmesh->FinalizeTopology();
++   pmesh->ExchangeFaceNbrData();
++
++   auto check_faces = [&]()
++   {
++      // repopulate the local to shared map.
++      local_to_shared.clear();
++      for (int i = 0; i < pmesh->GetNSharedFaces(); ++i)
++      {
++         local_to_shared[pmesh->GetSharedFace(i)] = i;
++      }
++
++      // Count the number of internal faces via the boundary elements
++      num_internal = 0;
++      for (int n = 0; n < pmesh->GetNBE(); ++n)
++      {
++         int f, o;
++         pmesh->GetBdrElementFace(n, &f, &o);
++         if (CheckFaceInternal(*pmesh, f, local_to_shared))
++         {
++            ++num_internal;
++         }
++      }
++      MPI_Allreduce(MPI_IN_PLACE, &num_internal, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
++      CHECK(num_internal == std::pow(4, ref_level));
++
++      CAPTURE(refined_attribute);
++      CheckPoisson(*pmesh, p, smesh.bdr_attributes.Max());
++      CheckPoisson(*pmesh, p);
++   };
++
++   int new_ess_dofs = CountEssentialDof(*pmesh, p, smesh.bdr_attributes.Max());
++   if (Mpi::WorldRank() == 0)
++   {
++      CHECK(new_ess_dofs == num_initial_ess_tdof);
++   }
++   check_faces();
++   pmesh->Rebalance();
++   pmesh->ExchangeFaceNbrData();
++   check_faces();
 +}
 +
 +TEST_CASE("InteriorBoundaryInlineTetRefines", "[Parallel], [NCMesh]")
 +{
-+   int p = GENERATE(1,2,3);
++   int p = GENERATE(1,2);
 +   CAPTURE(p);
 +
 +   auto smesh = Mesh("../../data/inline-tet.mesh");
@@ -2726,9 +2877,10 @@ index 1c512fcd4..88b428d0b 100644
 +   smesh.Finalize();
 +
 +   // Mark even and odd elements with different attributes
++   auto num_attributes = 3;
 +   for (int i = 0; i < smesh.GetNE(); ++i)
 +   {
-+      smesh.SetAttribute(i, (i % 2) + 1);
++      smesh.SetAttribute(i, (i % num_attributes) + 1);
 +   }
 +
 +   smesh.SetAttributes();
@@ -2796,26 +2948,29 @@ index 1c512fcd4..88b428d0b 100644
 +   CheckPoisson(*pmesh, p, new_attribute);
 +   CheckPoisson(*pmesh, p);
 +
-+   // Mark every third element for refinement
-+   Array<int> elem_to_refine;
-+   const int factor = 3;
-+   for (int i = 0; i < smesh.GetNE()/factor; ++i)
++   // Mark all elements of a given attribute for refinement to a given depth.
++   auto ref_level = GENERATE(1,2);
++   auto marked_attribute = GENERATE(1,2,3);
++   REQUIRE(marked_attribute <= num_attributes);
++   CAPTURE(ref_level);
++   CAPTURE(marked_attribute);
++   for (int r = 0; r < ref_level; r++)
 +   {
-+      elem_to_refine.Append(factor * i);
++      Array<int> elem_to_refine;
++      for (int i = 0; i < smesh.GetNE(); ++i)
++      {
++         if (smesh.GetAttribute(i) == marked_attribute)
++         {
++            elem_to_refine.Append(i);
++         }
++      }
++      smesh.GeneralRefinement(elem_to_refine);
 +   }
-+   smesh.GeneralRefinement(elem_to_refine);
 +
 +   pmesh = CheckParMeshNBE(smesh);
 +   pmesh->FinalizeTopology();
 +   pmesh->Finalize();
 +   pmesh->ExchangeFaceNbrData();
-+
-+   // repopulate the local to shared map.
-+   local_to_shared.clear();
-+   for (int i = 0; i < pmesh->GetNSharedFaces(); ++i)
-+   {
-+      local_to_shared[pmesh->GetSharedFace(i)] = i;
-+   }
 +
 +   // Count the number of internal boundary elements
 +   num_internal_serial = 0;
@@ -2831,27 +2986,43 @@ index 1c512fcd4..88b428d0b 100644
 +      }
 +   }
 +
-+   num_internal = 0;
-+   for (int n = 0; n < pmesh->GetNBE(); ++n)
++   auto check_faces = [&]()
 +   {
-+      int f, o;
-+      pmesh->GetBdrElementFace(n, &f, &o);
-+      if (CheckFaceInternal(*pmesh, f, local_to_shared))
++      // repopulate the local to shared map.
++      local_to_shared.clear();
++      for (int i = 0; i < pmesh->GetNSharedFaces(); ++i)
 +      {
-+         ++num_internal;
++         local_to_shared[pmesh->GetSharedFace(i)] = i;
 +      }
-+   }
-+   MPI_Allreduce(MPI_IN_PLACE, &num_internal, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 +
-+   CHECK(num_internal == num_internal_serial);
++      num_internal = 0;
++      for (int n = 0; n < pmesh->GetNBE(); ++n)
++      {
++         int f, o;
++         pmesh->GetBdrElementFace(n, &f, &o);
++         if (CheckFaceInternal(*pmesh, f, local_to_shared))
++         {
++            ++num_internal;
++         }
++      }
++      MPI_Allreduce(MPI_IN_PLACE, &num_internal, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 +
-+   CheckPoisson(*pmesh, p, pmesh->bdr_attributes.Max());
-+   CheckPoisson(*pmesh, p);
++      CHECK(num_internal == num_internal_serial);
++
++      CheckPoisson(*pmesh, p, pmesh->bdr_attributes.Max());
++      CheckPoisson(*pmesh, p);
++   };
++
++   check_faces();
++   pmesh->Rebalance();
++   pmesh->ExchangeFaceNbrData();
++   check_faces();
 +}
 +
 +TEST_CASE("InteriorBoundaryReferenceCubes", "[Parallel], [NCMesh]")
 +{
-+   auto p = GENERATE(1,2,3);
++   // auto p = GENERATE(1,2,3);
++   auto p = GENERATE(1);
 +   CAPTURE(p);
 +
 +   auto smesh = Mesh("../../data/ref-cube.mesh");
@@ -3134,8 +3305,131 @@ index 1c512fcd4..88b428d0b 100644
 +   CheckPoisson(*pmesh, p);
 +}
 +
- #endif // MFEM_USE_MPI
- 
++TEST_CASE("ParMeshInternalBoundaryStarMesh", "[Parallel], [NCMesh]")
++{
++   auto smesh = StarMesh();
++   smesh.EnsureNCMesh(true);
++
++   if (Mpi::WorldSize() < 5){ return;}
++
++   auto partition = std::unique_ptr<int[]>(new int[5]);
++   for (int i = 0; i < 5; i++)
++   {
++      partition[i] = i;
++   }
++   auto pmesh = CheckParMeshNBE(smesh, partition);
++   pmesh->FinalizeTopology();
++   pmesh->Finalize();
++   pmesh->ExchangeFaceNbrData();
++
++   REQUIRE(pmesh->Nonconforming());
++
++   std::map<int, int> local_to_shared;
++   for (int i = 0; i < pmesh->GetNSharedFaces(); ++i)
++   {
++      local_to_shared[pmesh->GetSharedFace(i)] = i;
++   }
++
++   // Count the number of internal faces via the boundary elements
++   int num_internal = 0;
++   for (int n = 0; n < pmesh->GetNBE(); ++n)
++   {
++      int f, o;
++      pmesh->GetBdrElementFace(n, &f, &o);
++      if (CheckFaceInternal(*pmesh, f, local_to_shared))
++      {
++         ++num_internal;
++      }
++   }
++
++   MPI_Allreduce(MPI_IN_PLACE, &num_internal, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
++   CHECK(num_internal == 4);
++
++   const int rank = Mpi::WorldRank();
++   CHECK(CountEssentialDof(*pmesh, 1, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 : 0));
++   CHECK(CountEssentialDof(*pmesh, 2, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 + 6 : 0));
++   CHECK(CountEssentialDof(*pmesh, 3, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 + 6*2 + 4*1 : 0));
++   CHECK(CountEssentialDof(*pmesh, 4, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 + 6*3 + 4*3 : 0));
++
++   CHECK(pmesh->GetNBE() == (rank == 0 ? 4 : (rank < 5 ? 3 : 0)));
++
++   // Refining an element attached to the core should not change the number of essential
++   // DOF, or the owner of them.
++   auto ParCountEssentialDof = [](ParMesh &mesh, int order, int attr)
++   {
++      auto num_essential_dof = CountEssentialDof(mesh, order, attr);
++      MPI_Allreduce(MPI_IN_PLACE, &num_essential_dof, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
++      return num_essential_dof;
++   };
++
++   SECTION("NonCore")
++   {
++      const int refined_attribute = GENERATE(2,3,4,5); // equal to rank of owner + 1
++      int ref_level = GENERATE(1,2,3);
++      for (int r = 0; r < ref_level; r++)
++      {
++         Array<int> el_to_refine;
++         for (int n = 0; n < pmesh->GetNE(); n++)
++         {
++            if (pmesh->GetAttribute(n) == refined_attribute)
++            {
++               el_to_refine.Append(n);
++            }
++         }
++         pmesh->GeneralRefinement(el_to_refine);
++      }
++      pmesh->ExchangeFaceNbrData();
++
++      // Refining on only one side of the boundary face should not change the number of
++      // essential true dofs, which should match the number within the original face.
++      CHECK(CountEssentialDof(*pmesh, 1, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 : 0));
++      CHECK(CountEssentialDof(*pmesh, 2, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 + 6 : 0));
++      CHECK(CountEssentialDof(*pmesh, 3, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 + 6*2 + 4*1 : 0));
++      CHECK(CountEssentialDof(*pmesh, 4, smesh.bdr_attributes.Max()) == (rank == 0 ? 4 + 6*3 + 4*3 : 0));
++
++      // The refined regions children now own the the boundary elements.
++      CHECK(pmesh->GetNE() == (rank == refined_attribute - 1 ? std::pow(8, ref_level) : (rank < 5 ? 1 : 0)));
++      CHECK(pmesh->GetNBE() == (rank == refined_attribute - 1 ? std::pow(4,ref_level + 1) : (rank < 5 ? 3 : 0)));
++   }
++   SECTION("Core")
++   {
++      const int refined_attribute = GENERATE(1,2,3,4,5); // equal to rank of owner + 1
++      int ref_level = GENERATE(0, 1, 2, 3);
++      for (int r = 0; r < ref_level; r++)
++      {
++         Array<int> el_to_refine;
++         for (int n = 0; n < pmesh->GetNE(); n++)
++         {
++            if (pmesh->GetAttribute(n) == refined_attribute)
++            {
++               el_to_refine.Append(n);
++            }
++         }
++         pmesh->GeneralRefinement(el_to_refine);
++      }
++      pmesh->ExchangeFaceNbrData();
++
++      CAPTURE(rank);
++      CAPTURE(refined_attribute);
++      CAPTURE(ref_level);
++      CHECK(pmesh->GetNE() == (rank == refined_attribute - 1 ? std::pow(8, ref_level) : 1));
++      CHECK(pmesh->GetNBE() == (rank == refined_attribute - 1
++                                    ? std::pow(4, ref_level + 1)
++                                    : (ref_level == 0 && rank == 0 ? 4 : 3)));
++
++      // Refining on only one side of the boundary face should not change the number of
++      // essential true dofs, which should match the number within the original face.
++      CHECK(ParCountEssentialDof(*pmesh, 1, smesh.bdr_attributes.Max()) == 4);
++      CHECK(ParCountEssentialDof(*pmesh, 2, smesh.bdr_attributes.Max()) == 4 + 6);
++      CHECK(ParCountEssentialDof(*pmesh, 3, smesh.bdr_attributes.Max()) == 4 + 6*2 + 4*1);
++      CHECK(ParCountEssentialDof(*pmesh, 4, smesh.bdr_attributes.Max()) == 4 + 6*3 + 4*3);
++   }
++}
++
++
++
++#endif // MFEM_USE_MPI
++
 +TEST_CASE("ReferenceCubeInternalBoundaries", "[NCMesh]")
 +{
 +   auto p = GENERATE(1,2,3);
@@ -3686,7 +3980,6 @@ index 1c512fcd4..88b428d0b 100644
 +{
 +   auto smesh = Mesh("../../data/ref-tetrahedron.mesh");
 +
-+
 +   smesh.FinalizeTopology();
 +   smesh.Finalize(true);
 +   smesh.UniformRefinement();
@@ -3697,25 +3990,140 @@ index 1c512fcd4..88b428d0b 100644
 +
 +   // Loop over elements and mark for refinement if any vertices match the
 +   // original
-+   Array<int> vertices, elements;
-+   // reference vertices of (0,0,0), (1,0,0), (0,1,0), (0,0,1) are [0,3]
-+   auto original_vert = [](int i) { return i >= 0 && i <= 3; };
-+   for (int n = 0; n < smesh.GetNE(); ++n)
-+   {
-+      smesh.GetElementVertices(n, vertices);
-+      if (std::any_of(vertices.begin(), vertices.end(), original_vert))
++   auto refine_corners = [&](){
++      Array<int> vertices, elements;
++      // reference vertices of (0,0,0), (1,0,0), (0,1,0), (0,0,1) are [0,3]
++      auto original_vert = [](int i) { return i >= 0 && i <= 3; };
++      for (int n = 0; n < smesh.GetNE(); ++n)
 +      {
-+         elements.Append(n);
++         smesh.GetElementVertices(n, vertices);
++         if (std::any_of(vertices.begin(), vertices.end(), original_vert))
++         {
++            elements.Append(n);
++         }
++      }
++
++      smesh.GeneralRefinement(elements);
++      smesh.FinalizeTopology();
++      smesh.Finalize();
++   };
++
++   constexpr int max_ref_levels = 4;
++   for (int r = 0; r < max_ref_levels; r++)
++   {
++      refine_corners();
++      CHECK(smesh.GetNBE() == 4 * (4 + 3 * 3 * (r + 1)));
++   }
++}
++
++
++TEST_CASE("TetInternalBoundaryRefinement", "[NCMesh]")
++{
++   auto smesh = Mesh("../../data/ref-tetrahedron.mesh");
++
++   REQUIRE(smesh.GetNBE() == 4);
++
++   {
++      Array<Refinement> refs;
++      refs.Append(Refinement(0, Refinement::X));
++      smesh.GeneralRefinement(refs);
++   }
++
++   // Now have a pair of elements, make the second element a different
++   // attribute.
++   smesh.SetAttribute(0, 1);
++   smesh.SetAttribute(1, 2);
++
++   // Introduce an internal boundary element
++   const int new_attribute = smesh.bdr_attributes.Max() + 1;
++   Array<int> original_boundary_vertices;
++   for (int f = 0; f < smesh.GetNumFaces(); ++f)
++   {
++      int e1, e2;
++      smesh.GetFaceElements(f, &e1, &e2);
++      if (e1 >= 0 && e2 >= 0 && smesh.GetAttribute(e1) != smesh.GetAttribute(e2))
++      {
++         // This is the internal face between attributes.
++         auto *new_elem = smesh.GetFace(f)->Duplicate(&smesh);
++         new_elem->SetAttribute(new_attribute);
++         new_elem->GetVertices(original_boundary_vertices);
++         smesh.AddBdrElement(new_elem);
++         break;
 +      }
 +   }
 +
-+   smesh.GeneralRefinement(elements);
 +   smesh.FinalizeTopology();
-+   smesh.Finalize();
++   smesh.Finalize(true);
++   smesh.UniformRefinement();
++   smesh.EnsureNCMesh(true);
 +
-+   // Each side of the tetrahedron should now have 1 original face, and then 3 *
-+   // 4 nonconformally generated faces.
-+   CHECK(smesh.GetNBE() == 4 * (1 + 3 * 4));
++   CHECK(smesh.GetNBE() == (2*3 + 1) * 4);
++
++   CHECK(CountEssentialDof(smesh, 1, smesh.bdr_attributes.Max()) == 6);
++   CHECK(CountEssentialDof(smesh, 2, smesh.bdr_attributes.Max()) == 6 + 3 * 3);
++   CHECK(CountEssentialDof(smesh, 3, smesh.bdr_attributes.Max()) == 10 + 3 * 6);
++
++   int refined_attribute = GENERATE(1,2);
++   int ref_level = GENERATE(1,2,3);
++   for (int r = 0; r < ref_level; r++)
++   {
++      Array<int> el_to_refine;
++      for (int n = 0; n < smesh.GetNE(); n++)
++      {
++         if (smesh.GetAttribute(n) == refined_attribute)
++         {
++            el_to_refine.Append(n);
++         }
++      }
++      smesh.GeneralRefinement(el_to_refine);
++   }
++
++   // Refining on only one side of the boundary face should not change the number of
++   // essential true dofs
++   CHECK(CountEssentialDof(smesh, 1, smesh.bdr_attributes.Max()) == 6);
++   CHECK(CountEssentialDof(smesh, 2, smesh.bdr_attributes.Max()) == 6 + 3 * 3);
++   CHECK(CountEssentialDof(smesh, 3, smesh.bdr_attributes.Max()) == 10 + 3 * 6);
++
++   // The number of boundary faces should have increased.
++   CHECK(smesh.GetNBE() == 3 * 4 + (3 + 1) * std::pow(4, 1+ref_level));
 +}
 +
++TEST_CASE("TetInternalBoundaryStarMesh", "[NCMesh]")
++{
++   auto smesh = StarMesh();
++   smesh.EnsureNCMesh(true);
++
++   CHECK(smesh.GetNBE() == 4 * 3 + 4);
++
++   CHECK(CountEssentialDof(smesh, 1, smesh.bdr_attributes.Max()) == 4);
++   CHECK(CountEssentialDof(smesh, 2, smesh.bdr_attributes.Max()) == 4 + 6);
++   CHECK(CountEssentialDof(smesh, 3, smesh.bdr_attributes.Max()) == 4 + 6*2 + 4*1);
++   CHECK(CountEssentialDof(smesh, 4, smesh.bdr_attributes.Max()) == 4 + 6*3 + 4*3);
++
++   int refined_attribute = GENERATE(1,2,3,4,5);
++   int ref_level = GENERATE(1,2,3);
++   for (int r = 0; r < ref_level; r++)
++   {
++      Array<int> el_to_refine;
++      for (int n = 0; n < smesh.GetNE(); n++)
++      {
++         if (smesh.GetAttribute(n) == refined_attribute)
++         {
++            el_to_refine.Append(n);
++         }
++      }
++      smesh.GeneralRefinement(el_to_refine);
++   }
++
++   // Refining on only one side of the boundary face should not change the number of
++   // essential true dofs
++   CHECK(CountEssentialDof(smesh, 1, smesh.bdr_attributes.Max()) == 4);
++   CHECK(CountEssentialDof(smesh, 2, smesh.bdr_attributes.Max()) == 4 + 6);
++   CHECK(CountEssentialDof(smesh, 3, smesh.bdr_attributes.Max()) == 4 + 6*2 + 4*1);
++   CHECK(CountEssentialDof(smesh, 4, smesh.bdr_attributes.Max()) == 4 + 6*3 + 4*3);
++
++   // The number of boundary faces should have increased.
++   CHECK(smesh.GetNBE() == 3 * 4 + 4 * std::pow(4,ref_level));
++}
+ 
  } // namespace mfem

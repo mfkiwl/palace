@@ -1163,8 +1163,151 @@ index 4c0bb68ee..da4c0187b 100644
  
     for (int k = I[i], end = I[i+1]; k < end; k++)
     {
+diff --git a/linalg/hiop.cpp b/linalg/hiop.cpp
+index 60db916b5..411d91dde 100644
+--- a/linalg/hiop.cpp
++++ b/linalg/hiop.cpp
+@@ -193,6 +193,48 @@ bool HiopOptimizationProblem::get_vecdistrib_info(size_type global_n,
+ #endif
+ }
+ 
++void HiopOptimizationProblem::solution_callback(hiop::hiopSolveStatus status,
++                                                hiop::size_type n,
++                                                const double *x,
++                                                const double *z_L,
++                                                const double *z_U,
++                                                hiop::size_type m,
++                                                const double *g,
++                                                const double *lambda,
++                                                double obj_value)
++{
++   auto hp = dynamic_cast<const HiOpProblem *>(&problem);
++   if (!hp) { return; }
++   hp->SolutionCallback(status, n, x, z_L, z_U, m, g, lambda, obj_value);
++}
++
++bool HiopOptimizationProblem::iterate_callback(int iter,
++                                               double obj_value,
++                                               double logbar_obj_value,
++                                               int n,
++                                               const double *x,
++                                               const double *z_L,
++                                               const double *z_U,
++                                               int m_ineq,
++                                               const double *s,
++                                               int m,
++                                               const double *g,
++                                               const double *lambda,
++                                               double inf_pr,
++                                               double inf_du,
++                                               double onenorm_pr_,
++                                               double mu,
++                                               double alpha_du,
++                                               double alpha_pr,
++                                               int ls_trials)
++{
++   auto hp = dynamic_cast<const HiOpProblem *>(&problem);
++   if (!hp) { return true; }
++   return hp->IterateCallback(iter, obj_value, logbar_obj_value, n, x, z_L, z_U,
++                              m_ineq, s, m, g, lambda, inf_pr, inf_du,
++                              onenorm_pr_, mu, alpha_du, alpha_pr, ls_trials);
++}
++
+ void HiopOptimizationProblem::UpdateConstrValsGrads(const Vector x)
+ {
+    if (constr_info_is_current) { return; }
+diff --git a/linalg/hiop.hpp b/linalg/hiop.hpp
+index 674c8221d..476361a93 100644
+--- a/linalg/hiop.hpp
++++ b/linalg/hiop.hpp
+@@ -167,6 +167,36 @@ public:
+    virtual bool get_vecdistrib_info(hiop::size_type global_n,
+                                     hiop::index_type *cols);
+ 
++   virtual void solution_callback(hiop::hiopSolveStatus status,
++                                  hiop::size_type n,
++                                  const double *x,
++                                  const double *z_L,
++                                  const double *z_U,
++                                  hiop::size_type m,
++                                  const double *g,
++                                  const double *lambda,
++                                  double obj_value);
++
++   virtual bool iterate_callback(int iter,
++                                 double obj_value,
++                                 double logbar_obj_value,
++                                 int n,
++                                 const double *x,
++                                 const double *z_L,
++                                 const double *z_U,
++                                 int m_ineq,
++                                 const double *s,
++                                 int m,
++                                 const double *g,
++                                 const double *lambda,
++                                 double inf_pr,
++                                 double inf_du,
++                                 double onenorm_pr_,
++                                 double mu,
++                                 double alpha_du,
++                                 double alpha_pr,
++                                 int ls_trials);
++
+ #ifdef MFEM_USE_MPI
+    virtual bool get_MPI_comm(MPI_Comm &comm_out)
+    {
+@@ -176,6 +206,48 @@ public:
+ #endif
+ };
+ 
++/// Users can inherit this class to access to HiOp-specific functionality.
++class HiOpProblem : public OptimizationProblem
++{
++public:
++   HiOpProblem(int insize, const Operator *C_, const Operator *D_)
++      : OptimizationProblem(insize, C_, D_) { }
++
++   /// See hiopInterfaceBase::solution_callback(...).
++   virtual void SolutionCallback(hiop::hiopSolveStatus status,
++                                 hiop::size_type n,
++                                 const double *x,
++                                 const double *z_L,
++                                 const double *z_U,
++                                 hiop::size_type m,
++                                 const double *g,
++                                 const double *lambda,
++                                 double obj_value) const
++   { }
++
++   /// See hiopInterfaceBase::iterate_callback(...).
++   virtual bool IterateCallback(int iter,
++                                double obj_value,
++                                double logbar_obj_value,
++                                int n,
++                                const double *x,
++                                const double *z_L,
++                                const double *z_U,
++                                int m_ineq,
++                                const double *s,
++                                int m,
++                                const double *g,
++                                const double *lambda,
++                                double inf_pr,
++                                double inf_du,
++                                double onenorm_pr_,
++                                double mu,
++                                double alpha_du,
++                                double alpha_pr,
++                                int ls_trials) const
++   { return true; }
++};
++
+ /// Adapts the HiOp functionality to the MFEM OptimizationSolver interface.
+ class HiopNlpOptimizer : public OptimizationSolver
+ {
 diff --git a/mesh/mesh.cpp b/mesh/mesh.cpp
-index ab2cc5a22..0ea2f4eb1 100644
+index ab2cc5a22..d7e562362 100644
 --- a/mesh/mesh.cpp
 +++ b/mesh/mesh.cpp
 @@ -1110,6 +1110,7 @@ FaceElementTransformations *Mesh::GetBdrFaceTransformations(int BdrElemNo)
@@ -1175,6 +1318,15 @@ index ab2cc5a22..0ea2f4eb1 100644
     tr = GetFaceElementTransformations(fn, 21);
     tr->Attribute = boundary[BdrElemNo]->GetAttribute();
     tr->ElementNo = BdrElemNo;
+@@ -1445,7 +1446,7 @@ Element::Type Mesh::GetFaceElementType(int Face) const
+ 
+ Array<int> Mesh::GetFaceToBdrElMap() const
+ {
+-   Array<int> face_to_be(GetNumFaces());
++   Array<int> face_to_be(Dim == 2 ? NumOfEdges : NumOfFaces);
+    face_to_be = -1;
+    for (int i = 0; i < NumOfBdrElements; i++)
+    {
 @@ -7162,7 +7163,7 @@ STable3D *Mesh::GetFacesTable()
              break;
           }
@@ -1981,6 +2133,120 @@ index 03689dfc4..df5fb929e 100644
  
     /// Return vertex/edge/face ('entity' == 0/1/2, resp.) owner.
     GroupId GetEntityOwnerId(int entity, int index)
+diff --git a/mesh/submesh/psubmesh.cpp b/mesh/submesh/psubmesh.cpp
+index 017564545..a7e5a772f 100644
+--- a/mesh/submesh/psubmesh.cpp
++++ b/mesh/submesh/psubmesh.cpp
+@@ -259,22 +259,17 @@ ParSubMesh::ParSubMesh(const ParMesh &parent, SubMesh::From from,
+ 
+       boundary.SetSize(NumOfBdrElements);
+       be2face.SetSize(NumOfBdrElements);
+-      Array<int> parent_face_to_be;
+-      int max_bdr_attr = -1;
+-      if (Dim == 3)
+-      {
+-         parent_face_to_be = parent.GetFaceToBdrElMap();
+-         max_bdr_attr = parent.bdr_attributes.Max();
+-      }
++      Array<int> parent_face_to_be = parent.GetFaceToBdrElMap();
++      int max_bdr_attr = parent.bdr_attributes.Max();
+       for (int i = 0, j = 0; i < num_of_faces_or_edges; i++)
+       {
+          if (GetFaceInformation(i).IsBoundary())
+          {
+             boundary[j] = faces[i]->Duplicate(this);
+-
+-            if (Dim == 3)
++            if (from == SubMesh::From::Domain && Dim >= 2)
+             {
+-               int pbeid = parent_face_to_be[parent_face_ids_[i]];
++               int pbeid = Dim == 3 ? parent_face_to_be[parent_face_ids_[i]] :
++                           parent_face_to_be[parent_edge_ids_[i]];
+                if (pbeid != -1)
+                {
+                   boundary[j]->SetAttribute(parent.GetBdrAttribute(pbeid));
+diff --git a/mesh/submesh/submesh.cpp b/mesh/submesh/submesh.cpp
+index c9f0b8508..b094d67fe 100644
+--- a/mesh/submesh/submesh.cpp
++++ b/mesh/submesh/submesh.cpp
+@@ -108,6 +108,31 @@ SubMesh::SubMesh(const Mesh &parent, From from,
+    }
+    else if (Dim == 2)
+    {
++      if (from == From::Domain)
++      {
++         parent_edge_ids_ = SubMeshUtils::BuildFaceMap(parent, *this,
++                                                       parent_element_ids_);
++         Array<int> parent_face_to_be = parent.GetFaceToBdrElMap();
++         int max_bdr_attr = parent.bdr_attributes.Max();
++
++         for (int i = 0; i < NumOfBdrElements; i++)
++         {
++            int pbeid = parent_face_to_be[parent_edge_ids_[GetBdrFace(i)]];
++            if (pbeid != -1)
++            {
++               int attr = parent.GetBdrElement(pbeid)->GetAttribute();
++               GetBdrElement(i)->SetAttribute(attr);
++            }
++            else
++            {
++               // This case happens when a domain is extracted, but the root parent
++               // mesh didn't have a boundary element on the surface that defined
++               // it's boundary. It still creates a valid mesh, so we allow it.
++               GetBdrElement(i)->SetAttribute(max_bdr_attr + 1);
++            }
++         }
++      }
++
+       parent_face_ori_.SetSize(NumOfElements);
+ 
+       for (int i = 0; i < NumOfElements; i++)
+diff --git a/mesh/submesh/submesh.hpp b/mesh/submesh/submesh.hpp
+index 050111f7f..33ca72ea1 100644
+--- a/mesh/submesh/submesh.hpp
++++ b/mesh/submesh/submesh.hpp
+@@ -199,6 +199,10 @@ private:
+    /// vertex ids.
+    Array<int> parent_vertex_ids_;
+ 
++   /// Mapping from SubMesh edge ids (index of the array), to the parent Mesh
++   /// face ids.
++   Array<int> parent_edge_ids_;
++
+    /// Mapping from SubMesh face ids (index of the array), to the parent Mesh
+    /// face ids.
+    Array<int> parent_face_ids_;
+diff --git a/mesh/submesh/submesh_utils.cpp b/mesh/submesh/submesh_utils.cpp
+index 3a8098727..c9a021dfe 100644
+--- a/mesh/submesh/submesh_utils.cpp
++++ b/mesh/submesh/submesh_utils.cpp
+@@ -191,15 +191,23 @@ Array<int> BuildFaceMap(const Mesh& pm, const Mesh& sm,
+ {
+    // TODO: Check if parent is really a parent of mesh
+ 
+-   Array<int> pfids(sm.GetNFaces());
++   Array<int> pfids(sm.GetNumFaces());
+    pfids = -1;
+    for (int i = 0; i < sm.GetNE(); i++)
+    {
+       int peid = parent_element_ids[i];
+ 
+       Array<int> sel_faces, pel_faces, o;
+-      sm.GetElementFaces(i, sel_faces, o);
+-      pm.GetElementFaces(peid, pel_faces, o);
++      if (pm.Dimension() == 2)
++      {
++         sm.GetElementEdges(i, sel_faces, o);
++         pm.GetElementEdges(peid, pel_faces, o);
++      }
++      else
++      {
++         sm.GetElementFaces(i, sel_faces, o);
++         pm.GetElementFaces(peid, pel_faces, o);
++      }
+ 
+       MFEM_ASSERT(sel_faces.Size() == pel_faces.Size(), "internal error");
+ 
 diff --git a/miniapps/meshing/CMakeLists.txt b/miniapps/meshing/CMakeLists.txt
 index 50ae7139d..1f242b8a4 100644
 --- a/miniapps/meshing/CMakeLists.txt
