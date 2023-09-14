@@ -1117,7 +1117,7 @@ void GetSurfaceNormal(mfem::ParMesh &mesh, const mfem::Array<int> &marker,
   // }
 }
 
-void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh,
+void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh, const IoData &iodata,
                             const std::string &output_serial_mesh_file)
 {
   // Write the parallel mesh to a stream as a serial mesh, then read back in and partition
@@ -1125,6 +1125,7 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh,
   auto comm = mesh->GetComm();
   constexpr bool generate_bdr = false, generate_edges = true, refine = true,
                  fix_orientation = true;
+  const bool save_serial_mesh = !output_serial_mesh_file.empty();
   std::unique_ptr<mfem::Mesh> smesh;
   std::unique_ptr<int[]> partitioning;
   if constexpr (false)
@@ -1133,10 +1134,12 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh,
     std::stringstream msg;
     msg.precision(MSH_FLT_PRECISION);
     mesh->PrintAsSerial(msg);
-    if (!output_serial_mesh_file.empty())
+    if (save_serial_mesh)
     {
       std::ofstream serial(output_serial_mesh_file);
+      iodata.DimensionalizeMesh(*mesh);
       mesh->PrintAsSerial(serial);
+      iodata.NondimensionalizeMesh(*mesh);
     }
     mesh.reset();  // Release the no longer needed memory.
     if (Mpi::Root(comm))
@@ -1155,7 +1158,7 @@ void RebalanceConformalMesh(std::unique_ptr<mfem::ParMesh> &mesh,
     {
       smesh.reset();
     }
-    else if (!output_serial_mesh_file.empty())
+    else if (save_serial_mesh)
     {
       std::ofstream serial(output_serial_mesh_file);
       smesh->Print(serial);

@@ -230,7 +230,7 @@ void PostOperator::InitializeDataCollection(const IoData &iodata)
     paraview_bdr.RegisterVCoeffField("A", As.get());
   }
 
-  // paraview.RegisterField("ErrorIndicator", &*indicator_field);
+  paraview.RegisterField("ErrorIndicator", &*indicator_field);
 
   // Extract surface charge from normally discontinuous ND E-field. Also extract surface
   // currents from tangentially discontinuous RT B-field The surface charge and surface

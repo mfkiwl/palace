@@ -123,9 +123,9 @@ mfem::Array<int> MarkedElements(double threshold, const mfem::Vector &e, bool gt
 
 // Helper function responsible for rebalancing the mesh, and optionally writing meshes from
 // the intermediate stages to disk.
-void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalance,
-                   const config::AdaptiveRefinementData &param, std::string output_dir)
+void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, const IoData &iodata, std::string output_dir)
 {
+  const auto &param = iodata.model.refinement.adaptation;
   auto comm = Mpi::World();
   int width = 1 + static_cast<int>(
                       std::log10(Mpi::Size(comm) - 1));  // For sizing parallel file names
@@ -143,7 +143,9 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
     std::ofstream pfile(
         mfem::MakeParFilename(output_dir + "prebalance.", Mpi::Rank(comm), ".mesh", width));
     mesh->SetPrintShared(false);  // Do not mark processor boundaries in the save
+    iodata.DimensionalizeMesh(*mesh);
     mesh->ParPrint(pfile);
+    iodata.NondimensionalizeMesh(*mesh);
   }
 
   // If there is more than one processor, perform the rebalancing.
@@ -168,23 +170,31 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
       if (Mpi::Root(comm))
       {
         std::ofstream serial(serial_mesh_filename);
+        iodata.DimensionalizeMesh(*mesh);
         mesh->Mesh::Print(serial);
+        iodata.NondimensionalizeMesh(*mesh);
       }
     }
 
-    if (ratio > maximum_imbalance)
+    if (ratio > param.maximum_imbalance)
     {
       Mpi::Print("Ratio {:.3f} exceeds maximum allowed value {}: Performing rebalancing.\n",
-                 ratio, maximum_imbalance);
+                 ratio, param.maximum_imbalance);
       if (mesh->Nonconforming())
       {
+        int pre_nbelem = mesh->GetNBE();
+        Mpi::GlobalSum(1, &pre_nbelem, comm);
         mesh->Rebalance();
+        int post_nbelem = mesh->GetNBE();
+        Mpi::GlobalSum(1, &post_nbelem, comm);
+        Mpi::Print("Pre nbelem {} Post nbelem {}\n", pre_nbelem, post_nbelem);
+        MFEM_VERIFY(pre_nbelem == post_nbelem, "!");
       }
       else
       {
         // Without access to a refinement tree, partitioning must be done on the
         // root processor and then redistributed.
-        mesh::RebalanceConformalMesh(mesh, serial_mesh_filename);
+        mesh::RebalanceConformalMesh(mesh, iodata, serial_mesh_filename);
       }
 
       if (param.write_post_balance_mesh)
@@ -192,7 +202,9 @@ void RebalanceMesh(std::unique_ptr<mfem::ParMesh> &mesh, double maximum_imbalanc
         std::ofstream pfile(mfem::MakeParFilename(output_dir + "postbalance.",
                                                   Mpi::Rank(comm), ".mesh", width));
         mesh->SetPrintShared(false);  // Do not mark processor boundaries in the save
+        iodata.DimensionalizeMesh(*mesh);
         mesh->ParPrint(pfile);
+        iodata.NondimensionalizeMesh(*mesh);
       }
     }
     mesh->ExchangeFaceNbrData();
@@ -292,11 +304,13 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
                ++iter, indicators.global_error_indicator, indicators.ndof);
     if (indicators.ndof < param.dof_limit)
     {
+      // Mark.
       const auto threshold = utils::ComputeDorflerThreshold(
           param.update_fraction, indicators.local_error_indicators);
       const auto marked_elements =
           MarkedElements(threshold, indicators.local_error_indicators);
 
+      // Refine.
       const auto initial_elem_count = mesh.back()->GetGlobalNE();
       mesh.back()->GeneralRefinement(marked_elements, -1, param.max_nc_levels);
       const auto final_elem_count = mesh.back()->GetGlobalNE();
@@ -337,7 +351,8 @@ BaseSolver::SolveEstimateMarkRefine(std::vector<std::unique_ptr<mfem::ParMesh>> 
                  final_elem_count);
     }
 
-    RebalanceMesh(mesh.back(), param.maximum_imbalance, param, post_dir);
+    // Solve + Estimate.
+    RebalanceMesh(mesh.back(), iodata, post_dir);
     indicators = Solve(mesh, timer);
 
     // Optionally save solution off.

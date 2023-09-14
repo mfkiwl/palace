@@ -44,6 +44,11 @@ public:
   // Nondimensionalize input values for use in the solver, including the mesh coordinates.
   void NondimensionalizeInputs(mfem::ParMesh &mesh);
 
+  // Redimensionalize a mesh for use in exporting a mesh.
+  void DimensionalizeMesh(mfem::ParMesh &mesh) const;
+  // Nondimensionalize a mesh for use in the solver.
+  void NondimensionalizeMesh(mfem::ParMesh &mesh) const;
+
   // Redimensionalize values for output.
   enum class ValueType
   {
