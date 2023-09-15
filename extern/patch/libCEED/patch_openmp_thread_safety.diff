@@ -1,0 +1,530 @@
+diff --git a/.github/workflows/c-fortran-test-icc.sh b/.github/workflows/c-fortran-test-icc.sh
+index e54c796f..893a4e64 100755
+--- a/.github/workflows/c-fortran-test-icc.sh
++++ b/.github/workflows/c-fortran-test-icc.sh
+@@ -5,6 +5,7 @@ source /opt/intel/oneapi/setvars.sh
+ 
+ # run tests
+ export CC=icc CXX=icc FC=ifort
++export OPENMP=1
+ make info
+ make -j2
+ PROVE_OPTS=-v make prove -j2
+diff --git a/Makefile b/Makefile
+index 308f20e7..846b93b8 100644
+--- a/Makefile
++++ b/Makefile
+@@ -107,13 +107,18 @@ MARCHFLAG.oneAPI        := $(MARCHFLAG.clang)
+ OMP_SIMD_FLAG.gcc       := -fopenmp-simd
+ OMP_SIMD_FLAG.clang     := $(OMP_SIMD_FLAG.gcc)
+ OMP_SIMD_FLAG.icc       := -qopenmp-simd
+-OMP_SIMD_FLAG.oneAPI    := $(OMP_SIMD_FLAG.clang)
++OMP_SIMD_FLAG.oneAPI    := $(OMP_SIMD_FLAG.icc)
++OMP_FLAG.gcc            := -fopenmp
++OMP_FLAG.clang          := $(OMP_FLAG.gcc)
++OMP_FLAG.icc            := -qopenmp
++OMP_FLAG.oneAPI         := $(OMP_FLAG.icc)
+ SYCL_FLAG.gcc           :=
+ SYCL_FLAG.clang         := -fsycl
+ SYCL_FLAG.icc           :=
+ SYCL_FLAG.oneAPI        := -fsycl -fno-sycl-id-queries-fit-in-int
+ OPT.gcc                 := -g -ffp-contract=fast
+ OPT.clang               := $(OPT.gcc)
++OPT.icc                 := $(OPT.gcc)
+ OPT.oneAPI              := $(OPT.clang)
+ OPT.emcc                :=
+ CFLAGS.gcc              := $(if $(STATIC),,-fPIC) -std=c99 -Wall -Wextra -Wno-unused-parameter -MMD -MP
+@@ -151,6 +156,7 @@ PEDANTICFLAGS ?= -Werror -pedantic
+ OPT    ?= -O $(MARCHFLAG) $(OPT.$(CC_VENDOR)) $(OMP_SIMD_FLAG)
+ CFLAGS ?= $(OPT) $(CFLAGS.$(CC_VENDOR)) $(if $(PEDANTIC),$(PEDANTICFLAGS))
+ CXXFLAGS ?= $(OPT) $(CXXFLAGS.$(CC_VENDOR)) $(if $(PEDANTIC),$(PEDANTICFLAGS))
++FFLAGS ?= $(OPT) $(FFLAGS.$(FC_VENDOR))
+ LIBCXX ?= -lstdc++
+ NVCCFLAGS ?= -ccbin $(CXX) -Xcompiler "$(OPT)" -Xcompiler -fPIC
+ ifneq ($(CUDA_ARCH),)
+@@ -160,10 +166,16 @@ HIPCCFLAGS ?= $(filter-out $(OMP_SIMD_FLAG),$(OPT)) -fPIC -munsafe-fp-atomics
+ ifneq ($(HIP_ARCH),)
+   HIPCCFLAGS += --amdgpu-target=$(HIP_ARCH)
+ endif
+-
+ SYCL_FLAG := $(SYCL_FLAG.$(CC_VENDOR))
+ SYCLFLAGS ?= $(SYCL_FLAG) -fPIC -std=c++17 $(filter-out -std=c++11,$(CXXFLAGS)) $(filter-out $(OMP_SIMD_FLAG),$(OPT))
+-FFLAGS ?= $(OPT) $(FFLAGS.$(FC_VENDOR))
++
++OPENMP ?=
++ifneq ($(OPENMP),)
++  OMP_FLAG := $(OMP_FLAG.$(CC_VENDOR))
++  OMP_FLAG := $(if $(call cc_check_flag,$(OMP_FLAG)),$(OMP_FLAG))
++  CFLAGS += $(OMP_FLAG)
++  CEED_LDFLAGS += $(OMP_FLAG)
++endif
+ 
+ ifeq ($(COVERAGE), 1)
+   CFLAGS += --coverage
+@@ -418,8 +430,8 @@ endif
+ 
+ # CUDA Backends
+ ifneq ($(CUDA_DIR),)
+-	CUDA_LIB_DIR := $(wildcard $(foreach d,lib lib64 lib/x86_64-linux-gnu,$(CUDA_DIR)/$d/libcudart.${SO_EXT}))
+-	CUDA_LIB_DIR := $(patsubst %/,%,$(dir $(firstword $(CUDA_LIB_DIR))))
++  CUDA_LIB_DIR := $(wildcard $(foreach d,lib lib64 lib/x86_64-linux-gnu,$(CUDA_DIR)/$d/libcudart.${SO_EXT}))
++  CUDA_LIB_DIR := $(patsubst %/,%,$(dir $(firstword $(CUDA_LIB_DIR))))
+ endif
+ CUDA_LIB_DIR_STUBS := $(CUDA_LIB_DIR)/stubs
+ CUDA_BACKENDS = /gpu/cuda/ref /gpu/cuda/shared /gpu/cuda/gen
+@@ -440,7 +452,7 @@ HIP_LIB_DIR := $(wildcard $(foreach d,lib lib64,$(ROCM_DIR)/$d/libamdhip64.${SO_
+ HIP_LIB_DIR := $(patsubst %/,%,$(dir $(firstword $(HIP_LIB_DIR))))
+ HIP_BACKENDS = /gpu/hip/ref /gpu/hip/shared /gpu/hip/gen
+ ifneq ($(HIP_LIB_DIR),)
+-	HIPCONFIG_CPPFLAGS := $(subst =,,$(shell $(ROCM_DIR)/bin/hipconfig -C))
++  HIPCONFIG_CPPFLAGS := $(subst =,,$(shell $(ROCM_DIR)/bin/hipconfig -C))
+   $(hip-all.c:%.c=$(OBJDIR)/%.o) $(hip-all.c:%=%.tidy): CPPFLAGS += $(HIPCONFIG_CPPFLAGS)
+   ifneq ($(CXX), $(HIPCC))
+     $(hip-all.cpp:%.cpp=$(OBJDIR)/%.o) $(hip-all.cpp:%=%.tidy): CPPFLAGS += $(HIPCONFIG_CPPFLAGS)
+@@ -456,14 +468,14 @@ endif
+ # SYCL Backends
+ SYCL_BACKENDS = /gpu/sycl/ref /gpu/sycl/shared /gpu/sycl/gen
+ ifneq ($(SYCL_DIR),)
+-	SYCL_LIB_DIR := $(wildcard $(foreach d,lib lib64,$(SYCL_DIR)/$d/libsycl.${SO_EXT}))
+-	SYCL_LIB_DIR := $(patsubst %/,%,$(dir $(firstword $(SYCL_LIB_DIR))))
++  SYCL_LIB_DIR := $(wildcard $(foreach d,lib lib64,$(SYCL_DIR)/$d/libsycl.${SO_EXT}))
++  SYCL_LIB_DIR := $(patsubst %/,%,$(dir $(firstword $(SYCL_LIB_DIR))))
+ endif
+ ifneq ($(SYCL_LIB_DIR),)
+-	PKG_LIBS += $(SYCL_FLAG) -lze_loader
+-	LIBCEED_CONTAINS_CXX = 1
+-	libceed.sycl += $(sycl-core.cpp) $(sycl-ref.cpp) $(sycl-shared.cpp) $(sycl-gen.cpp)
+-	BACKENDS_MAKE += $(SYCL_BACKENDS)
++  PKG_LIBS += $(SYCL_FLAG) -lze_loader
++  LIBCEED_CONTAINS_CXX = 1
++  libceed.sycl += $(sycl-core.cpp) $(sycl-ref.cpp) $(sycl-shared.cpp) $(sycl-gen.cpp)
++  BACKENDS_MAKE += $(SYCL_BACKENDS)
+ endif
+ 
+ # MAGMA Backends
+@@ -525,7 +537,7 @@ ifeq ($(LIBCEED_CONTAINS_CXX),1)
+   $(libceeds) : LINK = $(CXX)
+   ifeq ($(STATIC),1)
+     $(examples) $(tests) : CEED_LDLIBS += $(LIBCXX)
+-	  pkgconfig-libs-private += $(LIBCXX)
++    pkgconfig-libs-private += $(LIBCXX)
+   endif
+ endif
+ 
+@@ -772,7 +784,7 @@ ifneq ($(wildcard ../iwyu/*),)
+   IWYU_CC  ?= $(IWYU_DIR)/build/bin/include-what-you-use
+ endif
+ iwyu :
+-	 $(MAKE) -B CC=$(IWYU_CC)
++	$(MAKE) -B CC=$(IWYU_CC)
+ 
+ print :
+ 	@echo $(VAR)=$($(VAR))
+@@ -803,9 +815,9 @@ print-% :
+ 
+ # All variables to consider for caching
+ CONFIG_VARS = CC CXX FC NVCC NVCC_CXX HIPCC \
+-	OPT CFLAGS CPPFLAGS CXXFLAGS FFLAGS NVCCFLAGS HIPCCFLAGS SYCLFLAGS \
+-	AR ARFLAGS LDFLAGS LDLIBS LIBCXX SED \
+-	MAGMA_DIR OCCA_DIR XSMM_DIR CUDA_DIR CUDA_ARCH MFEM_DIR PETSC_DIR NEK5K_DIR ROCM_DIR HIP_ARCH SYCL_DIR
++  OPT CFLAGS CPPFLAGS CXXFLAGS FFLAGS NVCCFLAGS HIPCCFLAGS SYCLFLAGS \
++  AR ARFLAGS LDFLAGS LDLIBS LIBCXX SED \
++  MAGMA_DIR OCCA_DIR XSMM_DIR CUDA_DIR CUDA_ARCH MFEM_DIR PETSC_DIR NEK5K_DIR ROCM_DIR HIP_ARCH SYCL_DIR
+ 
+ # $(call needs_save,CFLAGS) returns true (a nonempty string) if CFLAGS
+ # was set on the command line or in config.mk (where it will appear as
+@@ -822,8 +834,8 @@ wheel : export MARCHFLAG = -march=generic
+ wheel : export WHEEL_PLAT = manylinux2010_x86_64
+ wheel :
+ 	docker run -it --user $(shell id -u):$(shell id -g) --rm -v $(PWD):/io -w /io \
+-		-e MARCHFLAG -e WHEEL_PLAT \
+-		quay.io/pypa/$(WHEEL_PLAT) python/make-wheels.sh
++	  -e MARCHFLAG -e WHEEL_PLAT \
++	  quay.io/pypa/$(WHEEL_PLAT) python/make-wheels.sh
+ 
+ .PHONY : configure wheel
+ 
+diff --git a/README.md b/README.md
+index 5ff4d4c8..a2060f67 100644
+--- a/README.md
++++ b/README.md
+@@ -65,11 +65,20 @@ To enable CUDA support, add `CUDA_DIR=/opt/cuda` or an appropriate directory to
+ To enable HIP support, add `ROCM_DIR=/opt/rocm` or an appropriate directory.
+ To enable SYCL support, add `SYCL_DIR=/opt/sycl` or an appropriate directory.
+ Note that SYCL backends require building with oneAPI compilers as well:
++
+ ```console
+ $ . /opt/intel/oneapi/setvars.sh
+ $ make SYCL_DIR=/opt/intel/oneapi/compiler/latest/linux SYCLCXX=icpx CC=icx CXX=icpx
+ ```
+ 
++The library can be configured for host applications which use OpenMP paralellism via:
++
++```console
++$ make OPENMP=1
++```
++
++which will allow operators created and applied from different threads inside an `omp parallel` region.
++
+ To store these or other arguments as defaults for future invocations of `make`, use:
+ 
+ ```console
+diff --git a/backends/ceed-backend-weak.c b/backends/ceed-backend-weak.c
+index 37b92e8b..2d8bd81c 100644
+--- a/backends/ceed-backend-weak.c
++++ b/backends/ceed-backend-weak.c
+@@ -25,7 +25,7 @@ static int CeedRegister_Weak(const char *name, int num_prefixes, ...) {
+   for (int i = 0; i < num_prefixes; i++) {
+     const char *prefix = va_arg(prefixes, const char *);
+ 
+-    CeedDebugEnv("** Weak Register: %s", prefix);
++    CeedDebugEnv("Weak Register   : %s", prefix);
+     ierr = CeedRegisterImpl(prefix, CeedInit_Weak, CEED_MAX_BACKEND_PRIORITY);
+     if (ierr) va_end(prefixes);  // Prevent leak on error
+     CeedChk(ierr);
+diff --git a/backends/ref/ceed-ref-restriction.c b/backends/ref/ceed-ref-restriction.c
+index 861dc3d7..e38e6002 100644
+--- a/backends/ref/ceed-ref-restriction.c
++++ b/backends/ref/ceed-ref-restriction.c
+@@ -187,7 +187,10 @@ static inline int CeedElemRestrictionApplyStridedTranspose_Ref_Core(CeedElemRest
+       CeedPragmaSIMD for (CeedInt k = 0; k < num_comp; k++) {
+         CeedPragmaSIMD for (CeedInt n = 0; n < elem_size; n++) {
+           CeedPragmaSIMD for (CeedInt j = 0; j < CeedIntMin(block_size, num_elem - e); j++) {
+-            vv[n + k * elem_size + (e + j) * elem_size * num_comp] += uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset];
++            CeedScalar uu_val;
++
++            uu_val = uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset];
++            CeedPragmaAtomic vv[n + k * elem_size + (e + j) * elem_size * num_comp] += uu_val;
+           }
+         }
+       }
+@@ -201,8 +204,10 @@ static inline int CeedElemRestrictionApplyStridedTranspose_Ref_Core(CeedElemRest
+       CeedPragmaSIMD for (CeedInt k = 0; k < num_comp; k++) {
+         CeedPragmaSIMD for (CeedInt n = 0; n < elem_size; n++) {
+           CeedPragmaSIMD for (CeedInt j = 0; j < CeedIntMin(block_size, num_elem - e); j++) {
+-            vv[n * strides[0] + k * strides[1] + (e + j) * strides[2]] +=
+-                uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset];
++            CeedScalar uu_val;
++
++            uu_val = uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset];
++            CeedPragmaAtomic vv[n * strides[0] + k * strides[1] + (e + j) * strides[2]] += uu_val;
+           }
+         }
+       }
+@@ -223,7 +228,10 @@ static inline int CeedElemRestrictionApplyOffsetTranspose_Ref_Core(CeedElemRestr
+       for (CeedInt i = 0; i < elem_size * block_size; i += block_size) {
+         // Iteration bound set to discard padding elements
+         for (CeedInt j = i; j < i + CeedIntMin(block_size, num_elem - e); j++) {
+-          vv[impl->offsets[j + e * elem_size] + k * comp_stride] += uu[elem_size * (k * block_size + e * num_comp) + j - v_offset];
++          CeedScalar uu_val;
++
++          uu_val = uu[elem_size * (k * block_size + e * num_comp) + j - v_offset];
++          CeedPragmaAtomic vv[impl->offsets[j + e * elem_size] + k * comp_stride] += uu_val;
+         }
+       }
+     }
+@@ -243,8 +251,10 @@ static inline int CeedElemRestrictionApplyOrientedTranspose_Ref_Core(CeedElemRes
+       for (CeedInt i = 0; i < elem_size * block_size; i += block_size) {
+         // Iteration bound set to discard padding elements
+         for (CeedInt j = i; j < i + CeedIntMin(block_size, num_elem - e); j++) {
+-          vv[impl->offsets[j + e * elem_size] + k * comp_stride] +=
+-              uu[elem_size * (k * block_size + e * num_comp) + j - v_offset] * (impl->orients[j + e * elem_size] ? -1.0 : 1.0);
++          CeedScalar uu_val;
++
++          uu_val = uu[elem_size * (k * block_size + e * num_comp) + j - v_offset] * (impl->orients[j + e * elem_size] ? -1.0 : 1.0);
++          CeedPragmaAtomic vv[impl->offsets[j + e * elem_size] + k * comp_stride] += uu_val;
+         }
+       }
+     }
+@@ -262,31 +272,39 @@ static inline int CeedElemRestrictionApplyCurlOrientedTranspose_Ref_Core(CeedEle
+   for (CeedInt e = start * block_size; e < stop * block_size; e += block_size) {
+     for (CeedInt k = 0; k < num_comp; k++) {
+       // Iteration bound set to discard padding elements
+-      CeedInt block_end = CeedIntMin(block_size, num_elem - e), n = 0;
++      const CeedInt block_end = CeedIntMin(block_size, num_elem - e);
++      CeedInt       n         = 0;
++
+       for (CeedInt j = 0; j < block_end; j++) {
+-        vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] +=
+-            uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
+-                impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size] +
+-            uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
+-                impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size];
++        CeedScalar uu_val;
++
++        uu_val = uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
++                     impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size] +
++                 uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
++                     impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size];
++        CeedPragmaAtomic vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] += uu_val;
+       }
+       for (n = 1; n < elem_size - 1; n++) {
+         for (CeedInt j = 0; j < block_end; j++) {
+-          vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] +=
+-              uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
+-                  impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size] +
+-              uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
+-                  impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size] +
+-              uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
+-                  impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size];
++          CeedScalar uu_val;
++
++          uu_val = uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
++                       impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size] +
++                   uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
++                       impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size] +
++                   uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
++                       impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size];
++          CeedPragmaAtomic vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] += uu_val;
+         }
+       }
+       for (CeedInt j = 0; j < block_end; j++) {
+-        vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] +=
+-            uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
+-                impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size] +
+-            uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
+-                impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size];
++        CeedScalar uu_val;
++
++        uu_val = uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
++                     impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size] +
++                 uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
++                     impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size];
++        CeedPragmaAtomic vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] += uu_val;
+       }
+     }
+   }
+@@ -304,33 +322,39 @@ static inline int CeedElemRestrictionApplyCurlOrientedUnsignedTranspose_Ref_Core
+   for (CeedInt e = start * block_size; e < stop * block_size; e += block_size) {
+     for (CeedInt k = 0; k < num_comp; k++) {
+       // Iteration bound set to discard padding elements
+-      CeedInt       n         = 0;
+       const CeedInt block_end = CeedIntMin(block_size, num_elem - e);
++      CeedInt       n         = 0;
+ 
+       for (CeedInt j = 0; j < block_end; j++) {
+-        vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] +=
+-            uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
+-                abs(impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size]) +
+-            uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
+-                abs(impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size]);
++        CeedScalar uu_val;
++
++        uu_val = uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
++                     abs(impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size]) +
++                 uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
++                     abs(impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size]);
++        CeedPragmaAtomic vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] += uu_val;
+       }
+       for (n = 1; n < elem_size - 1; n++) {
+         for (CeedInt j = 0; j < block_end; j++) {
+-          vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] +=
+-              uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
+-                  abs(impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size]) +
+-              uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
+-                  abs(impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size]) +
+-              uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
+-                  abs(impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size]);
++          CeedScalar uu_val;
++
++          uu_val = uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
++                       abs(impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size]) +
++                   uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
++                       abs(impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size]) +
++                   uu[e * elem_size * num_comp + (k * elem_size + n + 1) * block_size + j - v_offset] *
++                       abs(impl->curl_orients[j + (3 * n + 3) * block_size + e * 3 * elem_size]);
++          CeedPragmaAtomic vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] += uu_val;
+         }
+       }
+       for (CeedInt j = 0; j < block_end; j++) {
+-        vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] +=
+-            uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
+-                abs(impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size]) +
+-            uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
+-                abs(impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size]);
++        CeedScalar uu_val;
++
++        uu_val = uu[e * elem_size * num_comp + (k * elem_size + n - 1) * block_size + j - v_offset] *
++                     abs(impl->curl_orients[j + (3 * n - 1) * block_size + e * 3 * elem_size]) +
++                 uu[e * elem_size * num_comp + (k * elem_size + n) * block_size + j - v_offset] *
++                     abs(impl->curl_orients[j + (3 * n + 1) * block_size + e * 3 * elem_size]);
++        CeedPragmaAtomic vv[impl->offsets[j + n * block_size + e * elem_size] + k * comp_stride] += uu_val;
+       }
+     }
+   }
+diff --git a/doc/sphinx/source/releasenotes.md b/doc/sphinx/source/releasenotes.md
+index 1489ea02..e868513c 100644
+--- a/doc/sphinx/source/releasenotes.md
++++ b/doc/sphinx/source/releasenotes.md
+@@ -20,7 +20,8 @@ For example, `CeedOperatorContextGetFieldLabel` was renamed to `CeedOperatorGetC
+ - Added {c:func}`CeedBasisApplyAtPoints` for evalution of values and derivaties at arbitrary points inside elements.
+ - Added support for non-tensor $H(\text{curl})$ finite element spaces with {c:func}`CeedBasisCreateHcurl`.
+ - Added {c:func}`CeedElemRestrictionCreateCurlOriented`, similar to {c:func}`CeedElemRestrictionCreateOriented`, for element restrictions requiring more general element transformations such as those for high-order $H(\text{curl})$ spaces on tetrahedra (see [https://dl.acm.org/doi/pdf/10.1145/3524456](https://dl.acm.org/doi/pdf/10.1145/3524456)).
+-- Added {c:func}`CeedOperatorLinearAssemblePointBlockDiagonalSymbolic` to create COO mapping for mapping out of {c:func}`CeedOperatorLinearAssemblePointBlockDiagonal` 
++- Added {c:func}`CeedOperatorLinearAssemblePointBlockDiagonalSymbolic` to create COO mapping for mapping out of {c:func}`CeedOperatorLinearAssemblePointBlockDiagonal`. 
++- Added support for application codes which manage multiple {ref}`Ceed` objects, parallelized across OpenMP threads.
+ 
+ ### Examples
+ 
+diff --git a/include/ceed/backend.h b/include/ceed/backend.h
+index 64cc1970..700e566d 100644
+--- a/include/ceed/backend.h
++++ b/include/ceed/backend.h
+@@ -52,12 +52,29 @@
+ #elif defined(__GNUC__)
+ #define CeedPragmaOptimizeOn _Pragma("GCC pop_options")
+ #elif defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+-#define CeedPragmaOptimizeOff _Pragma("optimize('', on)")
++#define CeedPragmaOptimizeOn _Pragma("optimize('', on)")
+ #else
+ #define CeedPragmaOptimizeOn
+ #endif
+ #endif
+ 
++/// This macro provides the appropriate OpenMP Pragmas for the compilation environment.
++/// @ingroup Ceed
++#ifndef CeedPragmaOMP
++#ifdef _OPENMP
++#define CeedPragmaOMPHelper(x) _Pragma(#x)
++#define CeedPragmaOMP(x) CeedPragmaOMPHelper(omp x)
++#else
++#define CeedPragmaOMP(x)
++#endif
++#endif
++#ifndef CeedPragmaAtomic
++#define CeedPragmaAtomic CeedPragmaOMP(atomic update)
++#endif
++#ifndef CeedPragmaCritical
++#define CeedPragmaCritical(x) CeedPragmaOMP(critical(x))
++#endif
++
+ /**
+   This enum supples common colors for CeedDebug256 debugging output.
+   Set the environment variable `CEED_DEBUG = 1` to activate debugging output.
+diff --git a/interface/ceed-qfunction-register.c b/interface/ceed-qfunction-register.c
+index b9e57f51..d16075be 100644
+--- a/interface/ceed-qfunction-register.c
++++ b/interface/ceed-qfunction-register.c
+@@ -28,11 +28,17 @@ static bool register_all_called;
+   @ref User
+ **/
+ int CeedQFunctionRegisterAll() {
+-  if (register_all_called) return 0;
+-  register_all_called = true;
+-  CeedDebugEnv256(1, "\n---------- Registering Gallery QFunctions ----------\n");
+-#define CEED_GALLERY_QFUNCTION(name) CeedChk(name());
++  int ierr = 0;
++
++  CeedPragmaCritical(CeedQFunctionRegisterAll) {
++    if (!register_all_called) {
++      CeedDebugEnv256(1, "\n---------- Registering Gallery QFunctions ----------\n");
++#define CEED_GALLERY_QFUNCTION(name) \
++  if (!ierr) ierr = name();
+ #include "../gallery/ceed-gallery-list.h"
+ #undef CEED_GALLERY_QFUNCTION
+-  return CEED_ERROR_SUCCESS;
++      register_all_called = true;
++    }
++  }
++  return ierr;
+ }
+diff --git a/interface/ceed-qfunction.c b/interface/ceed-qfunction.c
+index e0bda46d..40debca3 100644
+--- a/interface/ceed-qfunction.c
++++ b/interface/ceed-qfunction.c
+@@ -63,21 +63,25 @@ static size_t num_qfunctions;
+ int CeedQFunctionRegister(const char *name, const char *source, CeedInt vec_length, CeedQFunctionUser f,
+                           int (*init)(Ceed, const char *, CeedQFunction)) {
+   const char *relative_file_path;
+-
+-  CeedCheck(num_qfunctions < sizeof(gallery_qfunctions) / sizeof(gallery_qfunctions[0]), NULL, CEED_ERROR_MAJOR, "Too many gallery QFunctions");
++  int         ierr = 0;
+ 
+   CeedDebugEnv("Gallery Register: %s", name);
+-
+   CeedCall(CeedGetJitRelativePath(source, &relative_file_path));
+-
+-  strncpy(gallery_qfunctions[num_qfunctions].name, name, CEED_MAX_RESOURCE_LEN);
+-  gallery_qfunctions[num_qfunctions].name[CEED_MAX_RESOURCE_LEN - 1] = 0;
+-  strncpy(gallery_qfunctions[num_qfunctions].source, relative_file_path, CEED_MAX_RESOURCE_LEN);
+-  gallery_qfunctions[num_qfunctions].source[CEED_MAX_RESOURCE_LEN - 1] = 0;
+-  gallery_qfunctions[num_qfunctions].vec_length                        = vec_length;
+-  gallery_qfunctions[num_qfunctions].f                                 = f;
+-  gallery_qfunctions[num_qfunctions].init                              = init;
+-  num_qfunctions++;
++  CeedPragmaCritical(CeedQFunctionRegister) {
++    if (num_qfunctions < sizeof(gallery_qfunctions) / sizeof(gallery_qfunctions[0])) {
++      strncpy(gallery_qfunctions[num_qfunctions].name, name, CEED_MAX_RESOURCE_LEN);
++      gallery_qfunctions[num_qfunctions].name[CEED_MAX_RESOURCE_LEN - 1] = 0;
++      strncpy(gallery_qfunctions[num_qfunctions].source, relative_file_path, CEED_MAX_RESOURCE_LEN);
++      gallery_qfunctions[num_qfunctions].source[CEED_MAX_RESOURCE_LEN - 1] = 0;
++      gallery_qfunctions[num_qfunctions].vec_length                        = vec_length;
++      gallery_qfunctions[num_qfunctions].f                                 = f;
++      gallery_qfunctions[num_qfunctions].init                              = init;
++      num_qfunctions++;
++    } else {
++      ierr = 1;
++    }
++  }
++  CeedCheck(ierr == 0, NULL, CEED_ERROR_MAJOR, "Too many gallery QFunctions");
+   return CEED_ERROR_SUCCESS;
+ }
+ 
+diff --git a/interface/ceed-register.c b/interface/ceed-register.c
+index e47221e9..c4b5a563 100644
+--- a/interface/ceed-register.c
++++ b/interface/ceed-register.c
+@@ -28,11 +28,17 @@ static bool register_all_called;
+   @ref User
+ **/
+ int CeedRegisterAll() {
+-  if (register_all_called) return 0;
+-  register_all_called = true;
++  int ierr = 0;
+ 
+-#define CEED_BACKEND(name, ...) CeedChk(name());
++  CeedPragmaCritical(CeedRegisterAll) {
++    if (!register_all_called) {
++      CeedDebugEnv256(1, "\n---------- Registering Backends ----------\n");
++#define CEED_BACKEND(name, ...) \
++  if (!ierr) ierr = name();
+ #include "../backends/ceed-backend-list.h"
+ #undef CEED_BACKEND
+-  return CEED_ERROR_SUCCESS;
++      register_all_called = true;
++    }
++  }
++  return ierr;
+ }
+diff --git a/interface/ceed.c b/interface/ceed.c
+index 6ca34363..055829df 100644
+--- a/interface/ceed.c
++++ b/interface/ceed.c
+@@ -122,13 +122,20 @@ int CeedRequestWait(CeedRequest *req) {
+   @ref Developer
+ **/
+ int CeedRegisterImpl(const char *prefix, int (*init)(const char *, Ceed), unsigned int priority) {
+-  CeedCheck(num_backends < sizeof(backends) / sizeof(backends[0]), NULL, CEED_ERROR_MAJOR, "Too many backends");
+-
+-  strncpy(backends[num_backends].prefix, prefix, CEED_MAX_RESOURCE_LEN);
+-  backends[num_backends].prefix[CEED_MAX_RESOURCE_LEN - 1] = 0;
+-  backends[num_backends].init                              = init;
+-  backends[num_backends].priority                          = priority;
+-  num_backends++;
++  int ierr = 0;
++
++  CeedPragmaCritical(CeedRegisterImpl) {
++    if (num_backends < sizeof(backends) / sizeof(backends[0])) {
++      strncpy(backends[num_backends].prefix, prefix, CEED_MAX_RESOURCE_LEN);
++      backends[num_backends].prefix[CEED_MAX_RESOURCE_LEN - 1] = 0;
++      backends[num_backends].init                              = init;
++      backends[num_backends].priority                          = priority;
++      num_backends++;
++    } else {
++      ierr = 1;
++    }
++  }
++  CeedCheck(ierr == 0, NULL, CEED_ERROR_MAJOR, "Too many backends");
+   return CEED_ERROR_SUCCESS;
+ }
+ 
